@@ -1,0 +1,513 @@
+---
+title: "HW4"
+author: "Group 8"
+date: "11 June 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+
+<br>
+
+Group :
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+
+<br>
+
+### Libraries used :
+
+<br>
+
+
+
+```{r setup-packages, message=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(splines)
+
+```
+
+<br>
+
+### Paths and Data :
+
+<br>
+
+We are loading the data in our R file.
+
+<br>
+
+```{r paths}
+load("/Users/lisabensoussan/Desktop/Lab4/chr1_line.rda")
+
+fname= "/Users/lisabensoussan/Desktop/Lab4/reads_gc_5K.rda"
+load(fname)
+
+#load("/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/chr1_line.rda")
+
+#fname= "/Users/Emmanuelle Fareau/Downloads/reads_gc_5K.rda"
+
+#load("")
+
+```
+
+<br>
+
+
+## Introduction :
+
+
+<br>
+
+In this study, we investigate the relationship between GC content and coverage using non-parametric regression and residual analysis. Understanding this relationship is crucial for improving genomic sequencing accuracy. Our approach will provide insights into the patterns and potential biases in sequencing data.
+
+
+<br>
+
+
+
+### Question א :
+
+
+<br>
+
+We want an overview of our data as we did in class :
+
+<br>
+
+
+```{r}
+if(any(GC_5K>1)){ 
+  GC_5K = GC_5K / 5000
+}
+
+plot(GC_5K,reads_5K)
+
+plot(GC_5K,reads_5K,ylim = c(0,500))
+```
+<br>
+
+In this analysis, we aimed to investigate the relationship between GC content and coverage in DNA sequence data using polynomial regression. First, we loaded the DNA sequence data and converted it into a character vector to handle individual nucleotide letters (A, C, G, T). We also prepared the coverage data `reads_5K` as a numeric vector. To align the DNA sequence data with the coverage data, we segmented the sequence into equal-sized chunks corresponding to the length of the coverage data.
+
+
+<br>
+
+```{r}
+
+sequence <- chr1_line
+sequence <- as.character(sequence)
+
+reads_5K <- as.numeric(reads_5K)
+
+segment_length <- floor(length(sequence) / length(reads_5K))
+num_segments <- length(reads_5K)
+
+segments <- split(sequence, rep(1:num_segments, each = segment_length, length.out = length(sequence)))
+
+```
+
+<br>
+
+Next, we calculated the GC content for each segment, defined as the sum of 'G' and 'C' nucleotides, and created a dataframe `data` containing the GC content and the corresponding coverage values. 
+
+<br>
+
+```{r}
+calculate_gc_content <- function(seq) {
+  gc_count <- sum(seq == "G" | seq == "C")
+  return(gc_count)
+}
+
+
+gc_contents <- sapply(segments, calculate_gc_content)
+
+
+stopifnot(length(gc_contents) == length(reads_5K))
+
+data <- data.frame(gc_content = gc_contents, coverage = reads_5K)
+data <- na.omit(data)
+
+
+```
+
+
+<br>
+
+
+We then defined a function to remove outliers based on the residuals from a third-degree polynomial regression, filtering out data points with residuals beyond three standard deviations.
+
+<br>
+
+```{r}
+
+remove_outliers <- function(data) {
+  model <- lm(coverage ~ poly(gc_content, 3), data = data)
+  residuals <- residuals(model)
+  data$residuals <- residuals
+  threshold <- 3 * sd(data$residuals, na.rm = TRUE)
+  
+  cleaned_data <- data %>%
+    filter(abs(residuals) <= threshold)
+  
+  return(cleaned_data)
+}
+
+```
+
+
+<br>
+
+We performed polynomial regression for degrees 1, 2, and 3 to model the relationship between GC content and coverage. For each degree, we fitted the regression model, predicted the coverage values, and calculated the residuals. Finally, we generated plots to visualize the regression results, showing the observed coverage against the GC content along with the predicted coverage values.
+
+<br>
+
+This approach allowed us to analyze how well the polynomial models fit the data and to identify any patterns or discrepancies.
+
+<br>
+
+```{r}
+
+perform_regression <- function(data, degree) {
+  cleaned_data <- remove_outliers(data)
+  model <- lm(coverage ~ poly(gc_content, degree), data = cleaned_data)
+  summary(model)
+  
+  predicted_coverage <- predict(model, newdata = cleaned_data)
+  residuals <- residuals(model)
+  
+  cleaned_data$predicted_coverage <- predicted_coverage
+  cleaned_data$residuals <- residuals
+  
+  plot_regression <- ggplot(cleaned_data, aes(x = gc_content, y = coverage)) +
+    geom_point() +
+    geom_line(aes(y = predicted_coverage), color = "blue") +
+    ggtitle(paste("Polynomial Regression of Coverage vs GC Content (Degree", degree, ")")) +
+    xlab("GC Content") +
+    ylab("Coverage")
+  
+  print(plot_regression)
+}
+
+
+
+for (degree in 1:3) {
+  perform_regression(data, degree)
+}
+
+```
+
+
+<br>
+
+
+The graph showing both the data and the trend line for the degree 2 suggests that the spline model fits the data well. This indicates that the non-linear model captures the relationship between GC content and coverage effectively, adjusting to the data’s complexity.
+
+
+<br>
+
+
+
+### Question ב :
+
+
+
+<br>
+
+In this analysis, we aimed to investigate the residuals from the polynomial regression models between `GC` content and `coverage` in DNA sequence data. First, we defined a function `residuals_regression` that generates a plot for the residuals of the polynomial regression model. This function takes in the data and the degree of the polynomial as inputs.
+
+<br>
+
+Inside the function, we used `ggplot2` to create a scatter plot of the residuals against the `GC` content.
+
+<br>
+
+We then looped through polynomial degrees 1, 2, and 3, calling the `residuals_regression` function for each degree. 
+
+<br>
+
+This allowed us to visualize the residuals from the regression models of different complexities, helping us understand how the fit of the model changes with increasing polynomial degrees and to identify any systematic patterns in the residuals.
+
+<br>
+
+```{r}
+
+# sans outliers 
+
+residuals_regression <- function(data, degree) {
+  cleaned_data <- remove_outliers(data)
+  model <- lm(coverage ~ poly(gc_content, degree), data = cleaned_data)
+  summary(model)
+  
+  predicted_coverage <- predict(model, newdata = cleaned_data)
+  residuals <- residuals(model)
+  
+  cleaned_data$predicted_coverage <- predicted_coverage
+  cleaned_data$residuals <- residuals
+  
+  plot_residuals <- ggplot(cleaned_data, aes(x = gc_content, y = residuals)) +
+    geom_point() +
+    ggtitle(paste("Residual Analysis (Degree", degree, ")")) +
+    xlab("GC Content") +
+    ylab("Residuals")
+  print(plot_residuals)
+}
+
+for (degree in 1:3) {
+  residuals_regression(data, degree)
+}
+
+
+```
+
+
+<br>
+
+
+<br>
+
+The residual plot does not show significant biases for specific GC values, indicating that the model accounts for variations in GC content without systematic errors.
+
+<br>
+
+
+
+
+### Question ג :
+
+
+
+<br>
+
+we need to calculate the prediction quality for polynomial models of degree 1, 2 and 3 compared to a simple linear model. A common way to measure prediction quality is to use the coefficient of determination $R^2$ or the mean square error (MSE). We will compare these measurements between the different models to assess the improvement in fit.
+ 
+<br>
+
+
+```{r}
+
+calculate_metrics <- function(model, data) {
+  predicted <- predict(model, newdata = data)
+  actual <- data$coverage
+  ss_res <- sum((actual - predicted) ^ 2)
+  ss_tot <- sum((actual - mean(actual)) ^ 2)
+  r_squared <- 1 - (ss_res / ss_tot)
+  mse <- mean((actual - predicted) ^ 2)
+  return(list(r_squared = r_squared, mse = mse))
+}
+
+
+perform_regression <- function(data, degree) {
+  cleaned_data <- remove_outliers(data)
+  model <- lm(coverage ~ poly(gc_content, degree), data = cleaned_data)
+  summary_model <- summary(model)
+  print(summary_model)
+  
+  metrics <- calculate_metrics(model, cleaned_data)
+  cat("\nR-squared:", metrics$r_squared, "\n")
+  cat("MSE:", metrics$mse, "\n")
+  
+  predicted_coverage <- predict(model, newdata = cleaned_data)
+  residuals <- residuals(model)
+  
+  cleaned_data$predicted_coverage <- predicted_coverage
+  cleaned_data$residuals <- residuals
+  
+  return(metrics)
+}
+
+
+metrics_list <- list()
+
+
+for (degree in 1:3) {
+  cat("\n\n### For Degree" , degree, "###\n\n")
+  metrics_list[[degree]] <- perform_regression(data, degree)
+}
+
+for (degree in 2:3) {
+  cat("\n\n### Improvement from Degree 1 to Degree", degree, "###\n\n")
+  improvement_r_squared <- metrics_list[[degree]]$r_squared / metrics_list[[1]]$r_squared
+  improvement_mse <- metrics_list[[1]]$mse / metrics_list[[degree]]$mse
+  cat("Improvement in R-squared:", improvement_r_squared, "\n")
+  cat("Improvement in MSE:", improvement_mse, "\n")
+}
+
+
+cat("\n\n### Improvement from Degree 2 to Degree 3###\n\n")
+improvement_r_squared <- metrics_list[[3]]$r_squared / metrics_list[[2]]$r_squared
+improvement_mse <- metrics_list[[2]]$mse / metrics_list[[3]]$mse
+cat("Improvement in R-squared:", improvement_r_squared, "\n")
+cat("Improvement in MSE:", improvement_mse, "\n")
+
+```
+
+
+<br>
+
+Degree 1 to Degree 2 - Transition from a simple linear model to a quadratic model.
+<br>
+Degree 1 to Degree 3 - Transition from a linear model to a cubic model.
+
+
+#### Results:
+
+Improvement from Degree 1 to Degree 2:
+<br>
+- **R²**: 1.064481 - Suggests that moving to a quadratic model leads to a 106.4481% improvement in the explanatory power of the model compared to a simple linear approach.
+<br>
+- **MSE**: 1.032745 - Indicates a 103.2745% reduction in the mean squared error, showing significantly fewer errors in prediction with the quadratic model.
+
+<br>
+
+Improvement from Degree 1 to Degree 3:
+<br>
+- **R²**: 1.102137 - Indicates a 110.2137% improvement in the variance explained when upgrading to a cubic model, suggesting even better adaptability to data complexities.
+<br>
+- **MSE**: 1.052878 - Represents a 105.2878% decrease in the mean squared error, further enhancing the prediction accuracy over the quadratic model.
+
+<br>
+
+The numerical improvements clearly show that increasing the polynomial degree of the model substantially enhances both the explanatory power and prediction accuracy. The cubic model (Degree 3) outperforms both the linear and quadratic models in terms of R² and MSE, suggesting it is best suited for capturing complex, non-linear relationships in the data. This trend implies a more precise alignment with the underlying data patterns, providing more reliable predictions.
+
+<br>
+
+
+
+### Question ד :
+
+
+
+<br>
+
+We need to examine whether the prediction quality (measured by residuals) varies across different GC values. We can analyze this visually using plots of residuals versus GC content and numerically by comparing residuals for different ranges of GC values.
+
+<br>
+
+
+```{r}
+perform_regression_and_return_cleaned_data <- function(data, degree) {
+  cleaned_data <- remove_outliers(data)
+
+  model <- lm(coverage ~ poly(gc_content, degree), data = cleaned_data)
+  summary_model <- summary(model)
+  print(summary_model)
+  
+  predicted_coverage <- predict(model, newdata = cleaned_data)
+  residuals <- residuals(model)
+  
+  cleaned_data$predicted_coverage <- predicted_coverage
+  cleaned_data$residuals <- residuals
+  
+  return(cleaned_data)
+}
+
+
+cleaned_data <- perform_regression_and_return_cleaned_data(data, 2)
+
+cleaned_data <- as.data.frame(cleaned_data)
+
+# Ajouter les tranches de GC au dataframe
+cleaned_data$gc_bins <- cut(cleaned_data$gc_content, breaks = quantile(cleaned_data$gc_content, probs = seq(0, 1, by = 0.2)), include.lowest = TRUE)
+
+ggplot(cleaned_data, aes(x = gc_content, y = abs(residuals))) +
+  geom_point() +
+  geom_smooth(method = "loess", color = "blue", se = FALSE) +
+  ggtitle("Residual Size vs GC Content") +
+  xlab("GC Content") +
+  ylab("Absolute Residuals")
+
+# Comparaison numérique des résidus par tranches de GC
+residual_summary <- cleaned_data %>%
+  group_by(gc_bins) %>%
+  summarise(mean_residual = mean(abs(residuals)), sd_residual = sd(abs(residuals)))
+
+print(residual_summary)
+
+```
+
+
+<br>
+
+- **Coefficients:**
+<br>
+  - **Intercept:** 161.442 (Standard Error: 0.2414) - Represents the baseline coverage when GC content is at the median level.
+  <br>
+  - **First Polynomial Term (Degree 1):** 7661.855 (Standard Error: 50.9424) - Indicates a strong positive association between coverage and GC content.
+  <br>
+  - **Second Polynomial Term (Degree 2):** -1945.581 (Standard Error: 50.9424) - Reflects the curvature in the relationship, suggesting that the effect of GC content on coverage may increase at a decreasing rate or may have a peak.
+
+<br>
+
+- **Residual Standard Error:** 50.94 - Represents the typical deviation of the observed coverages from the model-predicted values, measured on the same scale as the coverage.
+<br>
+
+- **Multiple R-squared:** 0.3509 - Approximately 35.09% of the variance in coverage is explained by the model, which is substantial but indicates room for potential improvement or unexplained variability.
+<br>
+
+- **Adjusted R-squared:** Same as R-squared in this context, confirming model efficiency after adjusting for the number of predictors.
+
+
+<br>
+
+#### Residual Analysis:
+The model residuals have a median close to zero, suggesting no bias in prediction, but the range of residuals (from -217.864 to 212.291) indicates potential outliers or anomalies in coverage that the model does not perfectly capture.
+
+<br>
+
+The plot of Residual Size vs GC Content reveals:
+- A polynomial fit is apparent, with the trend line peaking and then decreasing, which aligns with the signs of the polynomial coefficients.
+- The spread increases with higher GC content, suggesting higher variability in coverage as GC content increases, which might imply that other factors besides GC content influence coverage variability at high GC levels.
+
+<br>
+
+### Summary:
+The analysis indicates that while a polynomial model of GC content significantly predicts coverage, the variability explained is not complete, suggesting complex dynamics in genomic data. The model successfully captures the general trend but also highlights the need for possibly more sophisticated models or the inclusion of other explanatory variables to better understand and predict coverage across different GC content levels.
+
+<br>
+
+
+
+
+<br>
+
+
+
+## Short summary :
+
+<br>
+
+In this analysis, we investigated the distribution and behavior of genomic data across several models and tests. Our primary goal was to examine how the sequencing coverage and GC content across chromosome 1 conform to theoretical expectations and how these variables interact.
+
+<br>
+
+1. **Coverage Analysis**: We calculated the average coverage for a specific region and compared the observed distribution of read coverage to a theoretical Poisson distribution. The analysis indicated a significant deviation from the Poisson model, suggesting over-dispersion in the data.
+
+<br>
+
+2. **Polynomial Modeling**: We evaluated different polynomial degrees to model the relationship between GC content and sequencing coverage. A polynomial of degree 2 was found to be the most suitable for our analysis, providing a balance between model complexity and goodness of fit, as indicated by improvements in R-squared and MSE from degree 1 to degree 2.
+
+<br>
+
+3. **Residual Analysis**: An examination of residuals from our polynomial models showed that while the residuals decreased with higher polynomial degrees, degree 2 was preferred as it provided substantial improvement without overly complicating the model. This was visualized through residual plots that helped assess the variance and bias in our predictions.
+
+<br>
+
+4. **Correlation Analysis**: We explored the correlation between the number of reads and GC content, which revealed patterns and insights into the genomic structure and sequencing efficacy. Although the correlation was not strong, the models highlighted trends that are crucial for further biological and technical evaluations.
+
+<br>
+
+Overall, the comprehensive analysis across different statistical methods and models helped illuminate the complexities of genomic data, emphasizing areas where theoretical models align with or deviate from observed data. This synthesis not only enhances our understanding of genomic sequencing but also informs improvements in data processing and analysis strategies.
+
+
+<br>
+
+
