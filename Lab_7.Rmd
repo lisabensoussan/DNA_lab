@@ -1,0 +1,867 @@
+---
+title: "HW7"
+author: "Group 8"
+date: "9 July 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+<br>
+
+Group:
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+<br>
+
+### Libraries used
+
+<br>
+
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(splines)
+library(data.table)
+
+```
+
+<br>
+
+### Paths and Data
+
+```{r paths, warning=FALSE}
+
+cancer <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-01A_lib1_all_chr1.forward"
+cancer = fread(cancer)
+colnames(cancer) = c("Chrom","Loc","FragLen")
+head(cancer)
+
+healthy <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-10B_lib1_all_chr1.forward.gz"
+healthy = fread(healthy)
+colnames(healthy) = c("Chrom","Loc","FragLen")
+head(healthy)
+
+load("C:/Users/Emmanuelle Fareau/Downloads/chr1_str_30M_50M.rda")
+
+load("/Users/Emmanuelle Fareau/Downloads/GC_100.rda")
+load("/Users/Emmanuelle Fareau/Downloads/reads_100_B1.rda")
+load("/Users/Emmanuelle Fareau/Downloads/reads_100_A1.rda")
+load("/Users/Emmanuelle Fareau/Downloads/chr1_line.rda")
+
+fname= "/Users/Emmanuelle Fareau/Downloads/reads_gc_5K.rda"
+load(fname)
+
+
+
+
+# cancer <- "/Users/lisabensoussan/Desktop/Lab7/TCGA-13-0723-01A_lib1_all_chr1.forward"
+# cancer = fread(cancer)
+# colnames(cancer) = c("Chrom","Loc","FragLen")
+# head(cancer)
+# 
+# healthy <- "/Users/lisabensoussan/Desktop/Lab7/TCGA-13-0723-10B_lib1_all_chr1.forward"
+# healthy = fread(healthy)
+# colnames(healthy) = c("Chrom","Loc","FragLen")
+# head(healthy)
+# load("/Users/lisabensoussan/Desktop/Lab7/GC_100.rda")
+# load("/Users/lisabensoussan/Desktop/Lab7/reads_100_B1.rda")
+# load("/Users/lisabensoussan/Desktop/Lab7/reads_100_A1.rda")
+# 
+# load("/Users/lisabensoussan/Desktop/Lab7/chr1_line.rda")
+# load("/Users/lisabensoussan/Desktop/Lab7/reads_gc_5K.rda")
+# load("/Users/lisabensoussan/Desktop/Lab7/chr1_str_30M_50M.rda")
+
+
+#PATHS OF DAN :
+
+# cancer <- "/Users/danlevy/Desktop/TCGA-13-0723-01A_lib1_all_chr1.forward (2)"
+# cancer = fread(cancer)
+# colnames(cancer) = c("Chrom","Loc","FragLen")
+# head(cancer)
+# 
+# healthy <- "/Users/danlevy/Desktop/TCGA-13-0723-10B_lib1_all_chr1.forward"
+# healthy = fread(healthy)
+# colnames(healthy) = c("Chrom","Loc","FragLen")
+# head(healthy)
+
+
+
+
+```
+
+## Introduction 
+
+<br>
+
+In this lab, we will examine the distribution of GC bases across DNA segments and compare the different samples using regression splines and other statistical tools.
+
+<br>
+
+
+## Preliminary part
+
+<br>
+
+We prepare our data by calculating the number of GCs, and the number of fragments by performing spline regression for each cancer and healthy data.
+
+<br>
+
+
+```{r}
+sequence <- chr1_str_30M_50M
+sequence <- strsplit(sequence, "")
+sequence <- sequence[[1]]
+
+frag_cancer <- as.numeric(cancer$FragLen)
+frag_healthy <- as.numeric(healthy$FragLen)
+
+segment_length <- 10000
+num_segments <- length(sequence)/10000
+
+segments <- split(sequence, rep(1:num_segments, each = segment_length, length.out = length(sequence)))
+
+
+calculate_gc_content <- function(seq) {
+  gc_count <- sum(seq == "G" | seq == "C")
+  return(gc_count)
+}
+
+gc_contents <- sapply(segments, calculate_gc_content)
+head(gc_contents)
+
+
+count_fragment_starts <- function(data, chrom_number, start_range, end_range) {
+  relevant_data <- data[Chrom == chrom_number & Loc >= start_range & Loc <= end_range,]
+  start_counts <- integer(end_range - start_range + 1)
+  names(start_counts) <- as.character(start_range:end_range)
+  
+  starts <- table(relevant_data$Loc)
+  
+  start_positions <- as.character(names(starts))
+  start_counts[start_positions] <- as.integer(starts)
+  
+  return(start_counts)
+}
+
+fragment_counts_cancer <- count_fragment_starts(cancer, 1, 0, 20000000)
+fragment_counts_healthy <- count_fragment_starts(healthy, 1, 0, 20000000)
+
+
+
+sum_frag_cancer <- numeric(length = length(fragment_counts_cancer) / 10000)
+
+
+for (i in seq(1, length(fragment_counts_cancer), by = 10000)) {
+  group_index <- (i - 1) / 10000 
+  sum_frag_cancer[group_index] <- sum(fragment_counts_cancer[i:(i+9999)])
+}
+
+
+head(sum_frag_cancer)
+
+
+sum_frag_healthy <- numeric(length = length(fragment_counts_healthy) / 10000)
+
+
+for (i in seq(1, length(fragment_counts_healthy), by = 10000)) {
+  group_index <- (i - 1) / 10000 
+  sum_frag_healthy[group_index] <- sum(fragment_counts_healthy[i:(i+9999)])
+}
+
+
+head(sum_frag_healthy)
+
+
+
+data <- data.frame(gc_count = gc_contents, fragment_cancer = sum_frag_cancer, fragment_healthy = sum_frag_healthy)
+
+knots <- quantile(data$gc_count, probs = c(0.25, 0.5, 0.75))
+
+model_cancer <- lm(fragment_cancer ~ ns(gc_count, knots = knots), data = data)
+model_healty <- lm(fragment_healthy ~ ns(gc_count, knots = knots), data = data)
+
+print(summary(model_cancer))
+print(summary(model_healty))
+
+```
+
+
+<br>
+
+We draw graphs to better visualize our data.
+
+<br>
+
+
+```{r}
+
+threshold_cancer <- quantile(data$fragment_cancer, 0.99, na.rm = TRUE)
+threshold_healthy <- quantile(data$fragment_healthy, 0.99, na.rm = TRUE)
+
+
+
+filtered_data <- data %>%
+  filter(fragment_cancer <= threshold_cancer & fragment_healthy <= threshold_healthy)
+
+ggplot(filtered_data, aes(x = gc_count)) +
+  geom_point(aes(y = fragment_cancer, color = "Cancer")) +
+  geom_point(aes(y = fragment_healthy, color = "Healthy")) +
+  labs(x = "GC Count", y = "Fragments", color = "Type") +
+  theme_minimal()
+
+
+reads_5K <- as.numeric(reads_5K)
+
+segment_length <- floor(length(sequence) / length(reads_5K))
+num_segments <- length(reads_5K)
+
+segments <- split(sequence, rep(1:num_segments, each = segment_length, length.out = length(sequence)))
+
+calculate_gc_content <- function(seq) {
+  gc_count <- sum(seq == "G" | seq == "C")
+  return(gc_count)
+}
+
+
+gc_contents <- sapply(segments, calculate_gc_content)
+
+
+stopifnot(length(gc_contents) == length(reads_5K))
+
+data_essai <- data.frame(gc_content = gc_contents, coverage = reads_5K)
+data_essai <- na.omit(data_essai)
+
+remove_outliers <- function(data) {
+  model <- lm(coverage ~ poly(gc_content, 3), data = data)
+  residuals <- residuals(model)
+  data$residuals <- residuals
+  threshold <- 3 * sd(data$residuals, na.rm = TRUE)
+  
+  cleaned_data <- data %>%
+    filter(abs(residuals) <= threshold)
+  
+  return(cleaned_data)
+}
+
+data_essai <- remove_outliers(data_essai)
+
+ggplot(data_essai, aes(x = gc_content)) +
+  geom_point(aes(y = coverage), color = 'purple') +
+  labs(x = "GC Count", y = "Reads") +
+  ylim(0,500)+
+  theme_minimal()
+
+```
+
+
+
+```{r}
+sequence <- chr1_line
+sequence <- as.character(sequence)
+
+reads_cancer <- as.numeric(reads_100_A1)
+reads_healthy <- as.numeric(reads_100_B1)
+
+```
+
+```{r}
+
+set.seed(50)  # For reproducibility in sampling
+
+sample_indices_cancer <- sample(seq_along(reads_100_A1), 5000)
+sample_indices_healthy <- sample(seq_along(reads_100_B1), 5000)
+
+plot_data <- data.frame(
+  GC_100 = c(GC_100[sample_indices_cancer], GC_100[sample_indices_healthy]),
+  Reads = c(reads_100_A1[sample_indices_cancer], reads_100_B1[sample_indices_healthy]),
+  Type = rep(c("Cancer", "Healthy"), each = 5000)
+)
+
+plot_data <- na.omit(plot_data)
+plot_data <- plot_data[plot_data$Reads <= 100, ]
+
+ggplot(plot_data, aes(x = GC_100, y = Reads, color = Type)) +
+  geom_point(alpha = 0.6) +  
+  labs(
+    title = "GC Content vs. Read Counts (Filtered)",
+    x = "GC Content",
+    y = "Read Counts",
+    color = "Sample Type"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.position = "bottom"
+  ) +
+  scale_color_manual(values = c("Cancer" = "red", "Healthy" = "blue"))  # Define custom colors for the groups
+
+```
+
+<br>
+
+With all these values and data, we can now work in lab.
+
+<br>
+
+## Part 1
+
+
+### א :
+
+<br>
+
+
+Total variance formula :
+
+$$Var(Y)=E(Var(\frac{Y}{GC}))+Var(E(\frac{Y}{GC}))$$
+
+
+
+<br>
+
+
+
+<br>
+
+We creataed 2 new datasets, one for cancer and one for healthy in subsetting 'plot_data' such that'data_cancer' will only include rows where the Type column equals "Cancer" 'data_healthy' will only include rows where the Type column equals "Healthy".
+
+<br>
+
+```{r}
+data_cancer <- subset(plot_data, plot_data$Type == "Cancer")
+data_healthy <- subset(plot_data, plot_data$Type == "Healthy")
+```
+
+
+<br>
+
+
+We then calculate the median and the interquartile range (IQR) of the read counts for healthy data. These statistics are used to define a range for filtering outliers.
+We consider that reads that are below the lower bound or above the upper bound are considered outliers. Finally we filter out outlier reads from the healthy dataset such that 'healthy_data_filtered' will only include reads within the specified range.
+
+
+<br>
+
+
+<br>
+
+
+```{r}
+
+# Calculating median and IQR
+median_reads <- median(data_healthy$Reads)
+IQR_reads <- IQR(data_healthy$Reads)
+lower_bound <- median_reads - 1.5 * IQR_reads
+upper_bound <- median_reads + 1.5 * IQR_reads
+
+# Filtering outliers based on these bounds
+healthy_data_filtered <- data_healthy %>%
+  filter(Reads >= lower_bound & Reads <= upper_bound)
+
+```
+
+
+<br>
+
+
+We fit a Poisson regression model to the filtered healthy data and calculate the expected reads for each data point in the healthy filtered dataset using the fitted model.
+
+<br>
+
+
+
+
+<br>
+
+
+```{r}
+# Fit Poisson model
+model_poisson <- glm(Reads ~ GC_100, family = poisson(), data = healthy_data_filtered)
+
+# Calculate expected reads
+healthy_data_filtered$expected_reads <- predict(model_poisson, type = "response")
+
+```
+
+
+<br>
+
+
+We analyze the variance in read counts from a filtered healthy dataset using a Poisson regression model. This model estimates read counts based on GC content, where the expected variance from the model equates to the mean of the predicted reads, reflecting how well GC content explains read variability. Additionally, we calculated the variance of these predictions and the residual variance to quantify the unexplained portion of the total variance. The results are then expressed as percentages, highlighting the proportion of variance explained by the Poisson model, the impact of GC content, and the unexplained variance, providing a clear picture of the model's explanatory power and its limitations.
+
+<br>
+
+
+
+<br>
+
+
+
+```{r}
+# Total observed variance
+total_variance <- var(healthy_data_filtered$Reads)
+
+# Variance due to the Poisson model (since Var(Y|X) = E(Y|X) for a Poisson)
+expected_variance_due_to_poisson <- mean(healthy_data_filtered$expected_reads)
+
+# Variance of expected values (how much variance is explained by the GC effect alone)
+variance_of_expected_values <- var(healthy_data_filtered$expected_reads)
+
+
+
+# Calculate residual variance (unexplained variance)
+unexplained_variance <- total_variance - (expected_variance_due_to_poisson + variance_of_expected_values)
+
+percentage_due_to_poisson <- 100 * expected_variance_due_to_poisson / total_variance
+percentage_due_to_gc_effect <- 100 * variance_of_expected_values / total_variance
+percentage_unexplained <- 100 - (percentage_due_to_poisson + percentage_due_to_gc_effect)
+
+cat("Percentage of variance in the healthy sample due to the Poisson distribution: ", percentage_due_to_poisson, "%\n")
+cat("Percentage of the variation in the sample due to the GC effect: ", percentage_due_to_gc_effect, "%\n")
+cat("Percentage of the variation not explained by these factors: ", percentage_unexplained, "%\n")
+
+
+```
+
+
+## Part 2
+
+
+<br>
+
+A regression is performed in both the cancer sample and the saint sample. We want to compare these two models.
+
+<br>
+
+### ב :
+
+<br>
+```{r}
+
+ggplot(plot_data, aes(x = GC_100, y = Reads, color = Type)) +
+  geom_point(alpha = 0.6) +  # Using semi-transparent points to handle overlap visually
+  geom_smooth(method = "lm", formula = y ~ splines::ns(x, df = 4),   # Add spline regression line with 4 degrees of freedom
+              se = FALSE, aes(color = Type), size = 1) +  # 'se = FALSE' removes the confidence interval shading
+  labs(
+    title = "GC Content vs. Read Counts (Filtered)",
+    x = "GC Content",
+    y = "Read Counts",
+    color = "Sample Type"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),  # Center the title
+    legend.position = "bottom"
+  ) +
+  scale_color_manual(values = c("Cancer" = "red", "Healthy" = "blue"))  # Define custom colors for the groups
+
+```
+<br>
+
+Yes there is a correlation between GC with reads, and we can see that the two regressions are similar but not equals.
+
+<br>
+
+### ג :
+
+
+#### a :
+
+
+<br>
+
+
+In the provided R script, we first set up regression models for cancer and healthy datasets, using natural splines to model the relationship between reads and GC content, with knots placed at the quartiles of the GC content distribution. After cleaning the data of missing values, we fit separate linear models for each dataset. A custom function, `estimate_copy_number`, then uses these models to estimate copy numbers by dividing observed reads by the model-predicted factor, effectively normalizing read counts based on GC content. These estimated copy numbers are then plotted against their genome index and GC content to visualize the distribution and relationship of estimated copy numbers across the genome for both cancer and healthy samples, highlighting differences and similarities in copy number variation driven by genomic content.
+
+
+<br>
+
+
+```{r}
+knots <- quantile(data_cancer$GC_100, probs = c(0.25, 0.5, 0.75))
+
+data_cancer <- na.omit(data_cancer)
+data_healthy <- na.omit(data_healthy)
+
+
+model_cancer <- lm(Reads ~ ns(GC_100, knots = knots), data = data_cancer)
+model_healthy <- lm(Reads ~ ns(GC_100, knots = knots), data = data_healthy)
+
+estimate_copy_number <- function(Y, GC, model) {
+  # Ensure GC is named correctly according to the model's expectation
+  f_gc_hat <- predict(model, newdata = data.frame(GC_100 = GC))
+  a_hat <- Y / f_gc_hat
+  return(a_hat)
+}
+
+#apply the function to our cancer  data
+Y_cancer <- data_cancer$Reads
+GC_cancer<- data_cancer$GC_100
+
+#apply the function to our healthy  data
+Y_healthy <- data_healthy$Reads
+GC_healthy<- data_healthy$GC_100
+
+# Calculate estimated copy numbers
+estimated_copy_numbers_cancer <- estimate_copy_number(Y_cancer, GC_cancer, model_cancer)
+estimated_copy_numbers_healthy<- estimate_copy_number(Y_healthy, GC_healthy, model_healthy)
+
+
+head(estimated_copy_numbers_cancer)
+head(estimated_copy_numbers_healthy)
+
+
+```
+
+<br>
+
+We plot of the number of copies along the chromosome.
+
+<br>
+
+
+```{r}
+
+
+data_cancer$estimated_copies_cancer <- estimated_copy_numbers_cancer
+
+
+plot(estimated_copy_numbers_cancer, type = "l", main = "Distribution of copy number estimates of cancer along the genome", 
+     xlab = "Genome Index", ylab = "Copy number estimates cancer", col = "purple", lwd = 2)
+
+
+
+data_healthy$estimated_copies_healthy <- estimated_copy_numbers_healthy
+
+
+plot(estimated_copy_numbers_healthy, type = "l", main = "Distribution of copy number estimates of healthy along the genome", 
+     xlab = "Genome Index", ylab = "Copy number estimates healthy", col = "yellow", lwd = 2,, ylim = c(0,8))
+
+
+```
+
+<br>
+
+We visualize the relationship between GC content and estimated copies.
+
+<br>
+
+```{r}
+ggplot(data_cancer, aes(x = GC_100, y = estimated_copies_cancer, color = Type)) +
+  geom_point() +
+  labs(title = "GC Content vs. Estimated Copy Numbers of cancer",
+       x = "GC Content",
+       y = "Estimated Copy Numbers")
+
+ggplot(data_healthy, aes(x = GC_100, y = estimated_copies_healthy, color = Type)) +
+  geom_point() +
+  labs(title = "GC Content vs. Estimated Copy Numbers of healthy",
+       x = "GC Content",
+       y = "Estimated Copy Numbers")
+
+```
+ 
+
+##### for cancer:
+
+
+
+<br>
+
+
+In this R scripts, we first calculate the median and interquartile range (IQR) for the reads from both cancer and healthy datasets to determine bounds for filtering outliers. Data points falling outside 1.5 times the IQR from the median are considered outliers and are removed, creating a filtered subset for each dataset. We then visualize the relationship between reads and estimated copy numbers, comparing data before and after outlier removal. Scatter plots are generated for both datasets, highlighting differences using color-coded points, and legends are added to distinguish between unfiltered and filtered data, providing a clear visual representation of the impact of outlier correction on the estimated copy numbers.
+
+
+
+
+<br>
+
+
+```{r}
+
+median_reads_cancer <- median(data_cancer$Reads)
+IQR_reads_cancer <- IQR(data_cancer$Reads)
+lower_bound_cancer <- median_reads_cancer - 1.5 * IQR_reads_cancer
+upper_bound_cancer <- median_reads_cancer + 1.5 * IQR_reads_cancer
+
+data_cancer_filtered <- data_cancer %>%
+  filter(Reads >= lower_bound_cancer & Reads <= upper_bound_cancer)
+
+
+
+plot(data_cancer$Reads,data_cancer$estimated_copies_cancer,
+     col = "cyan", 
+     pch = 16, 
+     xlab = "Reads",
+     ylab = "Estimate copies number",
+     main = "Points Cloud for Cancer",
+     xlim = range(c(data_cancer$Reads, data_cancer_filtered$Reads)),
+     ylim = range(c(data_cancer$estimated_copies_cancer, data_cancer_filtered$estimated_copies_cancer)))
+
+points(data_cancer_filtered$Reads, data_cancer_filtered$estimated_copies_cancer,
+       col = "lightsalmon",
+       pch = 17)
+
+legend("topright", legend = c("Without correction of median", "With correction of median"),
+       col = c("cyan", "lightsalmon"), pch = c(16, 17))
+
+```
+
+<br>
+
+##### for healthy:
+
+<br>
+
+```{r}
+
+median_reads_healthy <- median(data_healthy$Reads)
+IQR_reads_healthy <- IQR(data_healthy$Reads)
+lower_bound_healthy <- median_reads_healthy - 1.5 * IQR_reads_healthy
+upper_bound_healthy <- median_reads_healthy + 1.5 * IQR_reads_healthy
+
+data_healthy_filtered <- data_healthy %>%
+  filter(Reads >= lower_bound_healthy & Reads <= upper_bound_healthy)
+
+
+
+plot(data_healthy$Reads,data_healthy$estimated_copies_healthy,
+     col = "lightgreen",
+     pch = 16, 
+     xlab = "Reads",
+     ylab = "Estimate copies number",
+     main = "Cloud Points for Healthy",
+     xlim = range(c(data_healthy$Reads, data_healthy_filtered$Reads)), 
+     ylim = range(c(data_healthy$estimated_copies_healthy, data_healthy_filtered$estimated_copies_healthy))) 
+
+points(data_healthy_filtered$Reads, data_healthy_filtered$estimated_copies_healthy,
+       col = "magenta", 
+       pch = 17) 
+
+legend("topright", legend = c("Without correction of median", "With correction of median"),
+       col = c("lightgreen", "magenta"), pch = c(16, 17))
+
+```
+
+
+
+<br>
+
+
+
+In the provided R script, we standardize the first column of both `data_healthy` and `data_cancer` datasets, assuming it represents GC content, and create a new z-score column in each dataset. We then fit linear models using these standardized values to predict reads, enhancing our analysis by capturing non-linear relationships through natural splines. Using these models, we estimate new copy numbers and visualize them along the genome, highlighting differences in the genomic distribution between cancer and healthy samples with distinct color-coded plots for clarity.
+
+
+
+<br>
+
+We standardize the value in the sample to see if there is a improved quality of estimators.
+
+
+<br>
+
+```{r}
+first_column <- data_healthy[[1]]
+mean_first_column <- mean(first_column, na.rm = TRUE)
+sd_first_column <- sd(first_column, na.rm = TRUE)
+standardized_first_column <- (first_column - mean_first_column) / sd_first_column
+data_healthy$new_gc_healthy <- standardized_first_column
+cat("First few standardized values in the new 'new_gc' column:\n")
+print(head(data_healthy$new_gc_healthy))
+
+```
+
+<br>
+
+We do the same as previous for the cancer data.
+
+<br>
+
+```{r}
+first_column <- data_cancer[[1]]
+mean_first_column <- mean(first_column, na.rm = TRUE)
+sd_first_column <- sd(first_column, na.rm = TRUE)
+standardized_first_column <- (first_column - mean_first_column) / sd_first_column
+data_cancer$new_gc_cancer <- standardized_first_column
+cat("First few standardized values in the new 'new_gc' column:\n")
+print(head(data_cancer$new_gc_cancer))
+```
+
+```{r}
+model_cancer_new <- lm(Reads ~ ns(GC_100, knots = knots), data = data_cancer)
+model_healthy_new <- lm(Reads ~ ns(GC_100, knots = knots), data = data_healthy)
+
+GC_cancer_new<- data_cancer$new_gc_cancer
+
+
+GC_healthy_new<- data_healthy$new_gc_healthy
+
+
+estimated_copy_numbers_cancer_new <- estimate_copy_number(Y_cancer, GC_cancer_new, model_cancer_new)
+estimated_copy_numbers_healthy_new<- estimate_copy_number(Y_healthy, GC_healthy_new, model_healthy_new)
+
+
+
+data_cancer$estimated_copies_cancer_new <- estimated_copy_numbers_cancer_new
+
+
+plot(estimated_copy_numbers_cancer_new, type = "l", main = "Distribution of copy number estimates of cancer along the genome", 
+     xlab = "Genome Index", ylab = "Copy number estimates cancer with new GC", col = "navy", lwd = 2)
+
+
+data_healthy$estimated_copies_healthy_new <- estimated_copy_numbers_healthy_new
+
+
+plot(estimated_copy_numbers_healthy_new, type = "l", main = "Distribution of copy number estimates of healthy along the genome", 
+     xlab = "Genome Index", ylab = "Copy number estimates healthywith new GC", col = "orange", lwd = 2)
+
+```
+
+<br>
+
+<br>
+
+
+
+### b :
+
+
+<br>
+
+We are looking to the copy number in the cancer data.
+
+<br>
+
+```{r}
+plot(estimated_copy_numbers_cancer, type = "l", main = "Distribution of copy number estimates of cancer along the genome", 
+     xlab = "Genome Index", ylab = "Copy number estimates cancer", col = "purple", lwd = 2)
+
+```
+
+<br>
+
+The graph shows several peaks along the genome, indicating variations in cancer copy number at different positions in the genome.
+Some segments of the genome have higher cancer copy values, while other segments have lower values.
+
+This variation may be due to different factors, such as specific regions of the genome that are more likely to be amplified or deleted in cancer cells.
+
+There are many high peaks and in general the values are around 2 which is already high. With the very high peaks which are quite current this accentuates the fact that in the genome affected by cancer there are more anomalies in the number of copies.
+
+<br>
+
+
+### c :
+
+<br>
+
+We now want to compare it to data healthy. To do this we will represent the estimated number of copies along the cancer and healthy genome at the same time to be able to compare them to each other.
+
+<br>
+
+```{r}
+y_limits <- c(0, 8)
+
+plot(estimated_copy_numbers_cancer, type = "l", 
+     main = "Distribution of copy number estimates along the genome", 
+     xlab = "Genome Index", ylab = "Copy number estimates", 
+     col = "purple", lwd = 2, ylim = y_limits)
+
+lines(estimated_copy_numbers_healthy, type = "l", 
+      col = "yellow", lwd = 2)
+
+legend("topright", legend = c("Cancer", "Healthy"), 
+       col = c("purple", "yellow"), lwd = 2)
+
+
+```
+
+<br>
+
+The two distributions (cancer in purple and healthy in yellow) show variations throughout the genome.
+The values for the cancer data appear more dispersed with higher peaks compared to the healthy data.
+The healthy data values seem more concentrated towards lower values.
+
+The two distributions show some similarity in general trends, with variations along the genome.
+However, the peaks for cancer are more pronounced, indicating segments of the genome with much higher copy levels.
+
+The cancer data shows greater variability and higher peaks, which is expected in cancer conditions where there are often amplifications or deletions of certain regions of the genome.
+Healthy data is more stable and shows less variability, which is expected for a healthy sample.
+
+<br>
+
+### d :
+
+<br>
+
+
+To do this question, we need to have a data with the estimated copies of cancer and healthy.
+
+
+
+<br>
+
+We create a graph with on the x-axis the estimated number of healthy copies and on the y-axis the estimated number of cancer copies.
+
+<br>
+
+
+```{r}
+data_cancer$estimated_copies_healthy <- NA
+data_healthy$estimated_copies_cancer <- NA
+
+cols_to_keep <- c("GC_100", "Reads", "Type", "estimated_copies_healthy", "estimated_copies_cancer")
+
+data_cancer_subset <- data_cancer[, cols_to_keep]
+data_healthy_subset <- data_healthy[, cols_to_keep]
+
+data_cancer_subset[is.na(data_cancer_subset)] <- 0
+data_healthy_subset[is.na(data_healthy_subset)] <- 0
+
+combined_data <- rbind(data_cancer_subset, data_healthy_subset)
+
+head(combined_data)
+
+
+ggplot(combined_data, aes(x = estimated_copies_healthy, y = estimated_copies_cancer, color = Type)) +
+  geom_point() +
+  labs(title = "Comparison of Copy Number Estimates: Healthy vs Cancer",
+       x = "Estimated Copy Number (Healthy)",
+       y = "Estimated Copy Number (Cancer)") +
+  theme_minimal()
+
+
+
+```
+
+
+<br>
+
+
+The graph "Comparison of Copy Number Estimates: Healthy vs Cancer" starkly illustrates the differences in genomic stability between healthy and cancer samples. Healthy samples mostly cluster around low estimated copy numbers, while cancer samples show a broader and higher range of estimates, highlighting significant variations typical of cancerous cells. This visualization underscores the potential of copy number analysis in distinguishing between malignant and normal tissues, emphasizing its importance in oncological diagnostics and treatment planning.
+
+
+<br>
+
+
+
+## Short summary
+
+
+<br>
+
+In this comprehensive analysis of genomic data from cancer and healthy samples, the study intricately explored the distribution of GC content and its impact on copy number estimates across the genome. Through meticulous data preparation and robust statistical modeling—including regression splines and Poisson models—the project successfully quantified the variability in copy number estimates and assessed the influence of GC content on these variations.
+
+The series of plots and regression analyses provided clear visual and quantitative insights into the genomic distinctions between cancerous and healthy tissues, highlighting the heightened variability and abnormal copy number changes associated with cancer. Notably, the study revealed significant genomic instability in cancer samples compared to the more stable copy number distribution in healthy samples, which is critical for understanding cancer's genomic underpinnings.
+
+The project also demonstrated the utility of advanced statistical techniques in genomic data analysis, such as outlier filtering and the application of natural splines for modeling complex relationships in high-throughput data. The results underscore the potential of genomic studies to advance our understanding of cancer biology and facilitate the development of targeted therapies, showcasing the power of statistical methods in biomedical research.
+
+
+<br>
