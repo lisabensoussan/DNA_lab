@@ -1,0 +1,608 @@
+---
+title: "HW8"
+author: "Group 8"
+date: "16 July 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+<br>
+
+Group:
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+<br>
+
+### Libraries used
+
+<br>
+
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(splines)
+library(data.table)
+library(caret)
+
+```
+
+<br>
+
+### Paths and Data
+
+```{r paths}
+# reads_data <- "/Users/lisabensoussan/Desktop/lab8/TCGA-13-0723-01A_lib1_all_chr1.forward"
+# chr1_reads = fread(reads_data)
+# colnames(chr1_reads) = c("Chrom","Loc","FragLen")
+# head(chr1_reads)
+# load("/Users/lisabensoussan/Desktop/lab8/chr1_str_30M_50M.rda")
+
+# 
+load("C:/Users/Emmanuelle Fareau/Downloads/chr1_str_30M_50M.rda")
+
+reads_data <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-01A_lib1_all_chr1.forward"
+chr1_reads = fread(reads_data)
+colnames(chr1_reads) = c("Chrom","Loc","FragLen")
+head(chr1_reads)
+
+
+
+# reads_data <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-01A_lib1_all_chr1.forward"
+# chr1_reads = fread(reads_data)
+# colnames(chr1_reads) = c("Chrom","Loc","FragLen")   
+# head(chr1_reads)
+# 
+# 
+data <- chr1_reads
+
+
+
+
+```
+
+## Introduction 
+
+<br>
+
+In this work, we will focus on several different models to estimate the number of copies in different chromosome areas. Our goal will be to study different numerical measures chosen in order to determine the method that has the best advantages over the others.
+
+<br>
+
+
+## Part 1
+
+<br>
+
+
+For this model, we want to estimate the number of copies ($\hat{a}$).
+
+<br>
+
+To do this, we will first divide our data into segments of length 1000, then we will calculate the number of GCs per segment.
+
+<br>
+
+```{r}
+sequence <- chr1_str_30M_50M
+sequence <- strsplit(sequence, "")
+sequence <- sequence[[1]]
+
+frag <- as.numeric(chr1_reads$FragLen)
+
+segment_length <- 10000
+num_segments <- length(sequence)/10000
+
+segments <- split(sequence, rep(1:num_segments, each = segment_length, length.out = length(sequence)))
+
+
+calculate_gc_content <- function(seq) {
+  gc_count <- sum(seq == "G" | seq == "C")
+  return(gc_count)
+}
+
+gc_contents <- sapply(segments, calculate_gc_content)
+head(gc_contents)
+```
+
+
+<br>
+
+Then we will calculate the number of fragments per segment :
+
+<br>
+
+
+```{r}
+count_fragment_starts <- function(data, chrom_number, start_range, end_range) {
+  relevant_data <- data[Chrom == chrom_number & Loc >= start_range & Loc <= end_range,]
+  start_counts <- integer(end_range - start_range + 1)
+  names(start_counts) <- as.character(start_range:end_range)
+  
+  starts <- table(relevant_data$Loc)
+  
+  start_positions <- as.character(names(starts))
+  start_counts[start_positions] <- as.integer(starts)
+  
+  return(start_counts)
+}
+
+fragment_counts <- count_fragment_starts(chr1_reads, 1, 0, 20000000)
+
+
+
+sum_frag <- numeric(length = length(fragment_counts) / 10000)
+
+
+for (i in seq(1, length(fragment_counts), by = 10000)) {
+  group_index <- (i - 1) / 10000 
+  sum_frag[group_index] <- sum(fragment_counts[i:(i+9999)])
+}
+
+
+head(sum_frag)
+
+```
+
+<br>
+
+For convenience, we will create a data which contains the two vectors that we want to calculate. That is to say the number of GCs and the number of fragments for each fragment of the chromosomes.
+
+<br>
+
+Finally, we will apply a spline regression on our model, with our GC count as an explanatory variable and our number of fragmentations as a variable to predict.
+
+<br>
+
+
+<br>
+
+```{r}
+
+data <- data.frame(gc_count = gc_contents, fragment = sum_frag)
+
+knots <- quantile(data$gc_count, probs = c(0.25, 0.5, 0.75))
+
+model <- lm(fragment ~ ns(gc_count, knots = knots), data = data)
+
+print(summary(model))
+
+
+```
+
+
+<br>
+
+Thanks to all the steps that we have just carried out, we will now be able to create a function to estimate the number of copies per cell.
+
+<br>
+
+
+```{r}
+
+estimate_copy_number <- function(Y, GC, f) {
+  f_gc_hat <- predict(model, newdata = data.frame(gc_count = GC))
+  a_hat <- Y / f_gc_hat
+  return(a_hat)
+}
+
+
+Y <- data$fragment
+GC <- data$gc_count
+
+
+estimated_copy_numbers <- estimate_copy_number(Y, GC, model)
+head(estimated_copy_numbers)
+
+copy_numbers <- list(estimated_copy_numbers)
+length(copy_numbers)
+```
+
+
+<br>
+
+
+<br>
+
+
+
+
+
+<br>
+
+```{r}
+# Filter for the region between 25M and 30M
+region_25_30m <- chr1_reads %>%
+  filter(Loc >= 25000000 & Loc <= 30000000)
+
+# Filter for the region between 75M and 80M
+region_75_80m <- chr1_reads %>%
+  filter(Loc >= 75000000 & Loc <= 80000000)
+
+
+
+calculate_adjusted_segments <- function(start, end, sequence, data) {
+  segment_length <- 1000
+  num_segments <- floor((end - start + 1) / segment_length)
+
+
+  gc_segment_indices <- split(seq(start, end), ceiling((seq(start, end) - start + 1) / segment_length))
+  gc_contents <- sapply(gc_segment_indices, function(indices) calculate_gc_content(sequence[indices - start + 1]))
+
+
+  fragment_counts <- sapply(gc_segment_indices, function(indices) {
+    sum(data$Loc >= indices[1] & data$Loc <= indices[length(indices)])
+  })
+
+
+  min_length <- min(length(gc_contents), length(fragment_counts))
+  gc_contents <- gc_contents[1:min_length]
+  fragment_counts <- fragment_counts[1:min_length]
+
+  list(gc_contents = gc_contents, fragment_counts = fragment_counts)
+}
+
+
+
+# 25M-30M Region
+region_25_30m_results <- calculate_adjusted_segments(25000000, 30000000, sequence, region_25_30m)
+estimated_copies_25_30m_a <- estimate_copy_number(region_25_30m_results$fragment_counts, region_25_30m_results$gc_contents, model)
+
+
+gc_correction_factor <- mean(region_25_30m_results$gc_contents) / mean(gc_contents)  
+estimated_copies_25_30m_b <- estimated_copies_25_30m_a / gc_correction_factor
+
+
+double_sample_estimate <- function(fragment_counts, gc_contents) {
+    double_counts <- fragment_counts * 2
+    estimate_copy_number(double_counts, gc_contents, model)
+}
+
+# Calculate for 25M-30M region
+estimated_copies_25_30m_c <- double_sample_estimate(region_25_30m_results$fragment_counts, region_25_30m_results$gc_contents)
+
+# Placeholder function for double sampling with GC correction
+double_sample_gc_correction <- function(fragment_counts, gc_contents) {
+    average_counts <- mean(fragment_counts)
+    average_gc_correction <- mean(gc_contents) / mean(gc_contents)  
+    adjusted_counts <- average_counts / average_gc_correction
+    estimate_copy_number(rep(adjusted_counts, length(gc_contents)), gc_contents, model)
+}
+
+# Calculate for 25M-30M region
+estimated_copies_25_30m_d <- double_sample_gc_correction(region_25_30m_results$fragment_counts, region_25_30m_results$gc_contents)
+
+
+# 75M-80M Region
+region_75_80m_results <- calculate_adjusted_segments(75000000, 80000000, sequence, region_75_80m)
+estimated_copies_75_80m_a <- estimate_copy_number(region_75_80m_results$fragment_counts, region_75_80m_results$gc_contents, model)
+
+# GC correction for single sample
+gc_correction_factor_75_80m <- mean(region_75_80m_results$gc_contents) / mean(gc_contents)
+estimated_copies_75_80m_b <- estimated_copies_75_80m_a / gc_correction_factor_75_80m
+
+
+double_sample_estimate <- function(fragment_counts, gc_contents) {
+    double_counts <- fragment_counts * 2
+    estimate_copy_number(double_counts, gc_contents, model)
+}
+
+# Calculate for 25M-30M region
+estimated_copies_75_80m_c <- double_sample_estimate(region_75_80m_results$fragment_counts, region_75_80m_results$gc_contents)
+
+# Placeholder function for double sampling with GC correction
+double_sample_gc_correction <- function(fragment_counts, gc_contents) {
+    average_counts <- mean(fragment_counts)
+    average_gc_correction <- mean(gc_contents) / mean(gc_contents)  
+    adjusted_counts <- average_counts / average_gc_correction
+    estimate_copy_number(rep(adjusted_counts, length(gc_contents)), gc_contents, model)
+}
+
+# Calculate for 25M-30M region
+estimated_copies_75_80m_d <- double_sample_gc_correction(region_75_80m_results$fragment_counts, region_75_80m_results$gc_contents)
+
+
+```
+
+
+```{r}
+
+par(mar=c(4, 4, 2, 1))  
+par(mfrow=c(4,1)) 
+
+# 25M-30M Region: 
+
+plot(estimated_copies_25_30m_a, type = 'l', col = 'black', main = "25M-30M: Without Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_25_30m_b, type = 'l', col = 'red', main = "25M-30M: GC Correction Single Sample", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+
+plot(estimated_copies_25_30m_c, type = 'l', col = 'green', main = "25M-30M: Double Sampling without GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_25_30m_d, type = 'l', col = 'blue', main = "25M-30M: Double Sampling with GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+
+#  for the 75M-80M region
+par(mfrow=c(4,1))  
+
+
+plot(estimated_copies_75_80m_a, type = 'l', col = 'black', main = "75M-80M: Without Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+plot(estimated_copies_75_80m_b, type = 'l', col = 'red', main = "75M-80M: GC Correction Single Sample", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_75_80m_c, type = 'l', col = 'green', main = "75M-80M: Double Sampling without GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_75_80m_d, type = 'l', col = 'blue', main = "75M-80M: Double Sampling with GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+```
+
+
+<br>
+
+
+## Part 2
+
+
+
+<br>
+
+
+
+<br>
+
+```{r}
+expected_copies <- 1  
+calculate_CQI <- function(estimated_copies) {
+  N <- length(estimated_copies)
+  deviation <- abs(estimated_copies - expected_copies)
+  std_dev <- sd(estimated_copies)
+  
+  if (std_dev == 0) std_dev <- 1
+  
+  CQI <- mean(deviation / std_dev)
+  return(CQI)
+}
+
+CQI_a <- calculate_CQI(estimated_copies_25_30m_a)
+CQI_b <- calculate_CQI(estimated_copies_25_30m_b)
+CQI_c <- calculate_CQI(estimated_copies_25_30m_c)
+CQI_d <- calculate_CQI(estimated_copies_25_30m_d)
+
+
+paste("CQI for 25_30m :")
+      
+print(paste("CQI without correction:", CQI_a))
+print(paste("CQI with single GC correction:", CQI_b))
+print(paste("CQI with double sampling without GC correction:", CQI_c))
+print(paste("CQI with double sampling with GC correction:", CQI_d))
+
+
+```
+```{r}
+expected_copies <- 1  
+
+calculate_RMSE <- function(estimated_copies) {
+  N <- length(estimated_copies)
+  squared_errors <- (estimated_copies - expected_copies)^2
+  RMSE <- sqrt(mean(squared_errors))
+  return(RMSE)
+}
+
+RMSE_a <- calculate_RMSE(estimated_copies_25_30m_a)
+RMSE_b <- calculate_RMSE(estimated_copies_25_30m_b)
+RMSE_c <- calculate_RMSE(estimated_copies_25_30m_c)
+RMSE_d <- calculate_RMSE(estimated_copies_25_30m_d)
+
+print(paste("RMSE without correction:", RMSE_a))
+print(paste("RMSE with single GC correction:", RMSE_b))
+print(paste("RMSE with double sampling without GC correction:", RMSE_c))
+print(paste("RMSE with double sampling with GC correction:", RMSE_d))
+
+```
+
+
+<br>
+
+
+
+<br>
+
+
+## Part 3
+
+<br>
+
+Method b: GC correction for a single sample
+
+This method corrects for the bias introduced by the GC composition of the genome, which can improve the accuracy of copy estimates.
+This method may not be robust for large variations in GC composition within segments.
+If the correction model is poorly calibrated, this can introduce additional bias.
+
+Method c: Double sampling without GC correction
+
+ Double sampling increases the number of readings, which can improve the accuracy of estimates by reducing noise.
+
+This method does not correct for GC composition bias, which can affect accuracy in regions where GC composition varies.
+Doubling of readings can complicate data analysis without meaningful input if GC bias is not corrected.
+
+Method d: Double sampling with GC correction
+
+ This method combines the advantages of GC correction and increased sampling depth, which can lead to more accurate and robust estimates.
+ By correcting for both GC bias and increasing readings, this method can provide better accuracy under varying GC conditions.
+But this method can be more complex to implement because it requires both GC correction and double sampling.
+It can also introduce bias if the GC correction is too aggressive or poorly calibrated.
+
+The results show that:
+
+Method b (single GC correction) has the lowest CQI and RMSE, indicating better accuracy performance compared to other methods. However, the lower CQI and RMSE may also indicate insufficient robustness under extreme conditions.
+
+Method c (double sampling without GC correction) shows an improvement over method a (without correction) but remains inferior to method b in terms of CQI and RMSE.
+
+The d method (double sampling with GC correction) shows a very high CQI, which may indicate over-correction or biases introduced by the GC correction method. The RMSE is close to that of method a, which may also indicate that the correction is not optimal.
+
+In conclusion, method b seems to offer the best compromise between simplicity and precision for the correction of composition bias in GC. Method d, although offering increased sampling depth, requires finer calibration to avoid over-correction. Method c, without GC correction, remains vulnerable to GC composition bias.
+
+
+<br>
+
+We test with other region to check if our conclusions are true.
+
+<br>
+
+```{r}
+# Filter for the region between 15M and 20M
+region_15_20m <- chr1_reads %>%
+  filter(Loc >= 15000000 & Loc <= 20000000)
+
+# Filter for the region between 35M and 40M
+region_35_40m <- chr1_reads %>%
+  filter(Loc >= 35000000 & Loc <= 40000000)
+
+
+# 15M-20M Region
+region_15_20m_results <- calculate_adjusted_segments(15000000, 20000000, sequence, region_15_20m)
+estimated_copies_15_20m_a <- estimate_copy_number(region_15_20m_results$fragment_counts, region_15_20m_results$gc_contents, model)
+
+gc_correction_factor <- mean(region_15_20m_results$gc_contents) / mean(gc_contents)  
+estimated_copies_15_20m_b <- estimated_copies_15_20m_a / gc_correction_factor
+
+
+estimated_copies_15_20m_c <- double_sample_estimate(region_15_20m_results$fragment_counts, region_15_20m_results$gc_contents)
+
+
+estimated_copies_15_20m_d <- double_sample_gc_correction(region_15_20m_results$fragment_counts, region_15_20m_results$gc_contents)
+
+
+
+
+# 35M-40M Region
+region_35_40m_results <- calculate_adjusted_segments(35000000, 40000000, sequence, region_35_40m)
+estimated_copies_35_40m_a <- estimate_copy_number(region_35_40m_results$fragment_counts, region_35_40m_results$gc_contents, model)
+
+
+gc_correction_factor_35_40m <- mean(region_35_40m_results$gc_contents) / mean(gc_contents)
+estimated_copies_35_40m_b <- estimated_copies_35_40m_a / gc_correction_factor_35_40m
+
+
+estimated_copies_35_40m_c <- double_sample_estimate(region_35_40m_results$fragment_counts, region_35_40m_results$gc_contents)
+
+
+estimated_copies_35_40m_d <- double_sample_gc_correction(region_35_40m_results$fragment_counts, region_35_40m_results$gc_contents)
+
+
+
+# For 15-20m region :
+
+par(mar=c(4, 4, 2, 1))  
+par(mfrow=c(4,1)) 
+
+
+plot(estimated_copies_15_20m_a, type = 'l', col = 'black', main = "15M-20M: Without Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_15_20m_b, type = 'l', col = 'red', main = "15M-20M: GC Correction Single Sample", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_15_20m_c, type = 'l', col = 'green', main = "15M-20M: Double Sampling without GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_15_20m_d, type = 'l', col = 'blue', main = "15M-20M: Double Sampling with GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+
+# For 35-40m region :
+
+par(mfrow=c(4,1))  
+
+
+plot(estimated_copies_35_40m_a, type = 'l', col = 'black', main = "35M-40M: Without Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+plot(estimated_copies_35_40m_b, type = 'l', col = 'red', main = "35M-40M: GC Correction Single Sample", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_35_40m_c, type = 'l', col = 'green', main = "35M-40M: Double Sampling without GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+plot(estimated_copies_35_40m_d, type = 'l', col = 'blue', main = "35M-40M: Double Sampling with GC Correction", xlab = "Segment Index", ylab = "Estimated Copy Numbers")
+
+
+
+```
+
+```{r}
+# for 15_20m region :
+
+CQI_a_15_20m <- calculate_CQI(estimated_copies_15_20m_a)
+CQI_b_15_20m <- calculate_CQI(estimated_copies_15_20m_b)
+CQI_c_15_20m <- calculate_CQI(estimated_copies_15_20m_c)
+CQI_d_15_20m <- calculate_CQI(estimated_copies_15_20m_d)
+
+
+print(paste("CQI without correction for 15_20m:", CQI_a_15_20m))
+print(paste("CQI with single GC correction for 15_20m:", CQI_b_15_20m))
+print(paste("CQI with double sampling without GC correction for 15_20m:", CQI_c_15_20m))
+print(paste("CQI with double sampling with GC correction for 15_20m:", CQI_d_15_20m))
+
+
+RMSE_a_15_20m <- calculate_RMSE(estimated_copies_15_20m_a)
+RMSE_b_15_20m <- calculate_RMSE(estimated_copies_15_20m_b)
+RMSE_c_15_20m <- calculate_RMSE(estimated_copies_15_20m_c)
+RMSE_d_15_20m <- calculate_RMSE(estimated_copies_15_20m_d)
+
+
+print(paste("RMSE without correction for 15_20m:", RMSE_a_15_20m))
+print(paste("RMSE with single GC correction for 15_20m:", RMSE_b_15_20m))
+print(paste("RMSE with double sampling without GC correction for 15_20m:", RMSE_c_15_20m))
+print(paste("RMSE with double sampling with GC correction for 15_20m:", RMSE_d_15_20m))
+```
+```{r}
+
+
+# For _35_40m region :
+
+CQI_a_35_40m <- calculate_CQI(estimated_copies_35_40m_a)
+CQI_b_35_40m <- calculate_CQI(estimated_copies_35_40m_b)
+CQI_c_35_40m <- calculate_CQI(estimated_copies_35_40m_c)
+CQI_d_35_40m <- calculate_CQI(estimated_copies_35_40m_d)
+
+
+print(paste("CQI without correction for 35_40m :", CQI_a_35_40m))
+print(paste("CQI with single GC correction for 35_40m :", CQI_b_35_40m))
+print(paste("CQI with double sampling without GC correction for 35_40m :", CQI_c_35_40m))
+print(paste("CQI with double sampling with GC correction for 35_40m :", CQI_d_35_40m))
+
+
+
+RMSE_a_35_40m <- calculate_RMSE(estimated_copies_35_40m_a)
+RMSE_b_35_40m <- calculate_RMSE(estimated_copies_35_40m_b)
+RMSE_c_35_40m <- calculate_RMSE(estimated_copies_35_40m_c)
+RMSE_d_35_40m <- calculate_RMSE(estimated_copies_35_40m_d)
+
+
+print(paste("RMSE without correction for 35_40m:", RMSE_a_35_40m))
+print(paste("RMSE with single GC correction for 35_40m:", RMSE_b_35_40m))
+print(paste("RMSE with double sampling without GC correction for 35_40m:", RMSE_c_35_40m))
+print(paste("RMSE with double sampling with GC correction for 35_40m:", RMSE_d_35_40m))
+```
+
+
+<br>
+
+The results support previous findings:
+
+GC correction for a single sample (method b) remains the most effective in reducing bias and prediction error, confirmed by low values of CQI and RMSE.
+Double sampling without GC correction (method c) improves accuracy compared to no correction, but remains less efficient than single GC correction.
+Double sampling with GC correction (method d) appears to introduce over-corrections, resulting in a very high CQI and a similar RMSE to that without correction.
+
+
+
+<br>
+
+
+## Short summary
+
+
+<br>
+
+In order to conclude, we measured different important values over several zones to determine if a particular trend was emerging. We noticed that method b (correction of simple sample of GC) had the greatest benefits and corresponded most to our expectations.
+
+
+<br>
