@@ -1,0 +1,747 @@
+```{r}
+library(dplyr)
+library(ggplot2)
+library(splines)
+library(data.table)
+library(caret)
+library('manipulate')
+```
+
+t = cancer
+n = healthy
+
+
+### א.
+
+```{r}
+path = "/Users/lisabensoussan/Desktop/FinalLab"
+#path = "/Users/Emmanuelle Fareau/Downloads"
+
+load(sprintf("%s/reads_100_A1.rda", path))
+load(sprintf("%s/reads_100_B1.rda", path))
+load(sprintf("%s/GC_100.rda", path))
+
+# Assuming each index covers 100K and 250-300 index covers 25M-30M
+index_range <- 0:700000  # Adjust this based on your actual data indexing
+
+# Filter data for the 25M-30M region
+filtered_reads_cancer <- reads_100_A1[index_range]
+filtered_reads_healthy <- reads_100_B1[index_range]
+filtered_gc <- GC_100[index_range]
+
+# Reshape data for plotting
+chr1_can = matrix(filtered_reads_cancer, nr = 50)
+reads_5K_c = colSums(chr1_can)
+
+chr1_hea = matrix(filtered_reads_healthy, nr = 50)
+reads_5K_h = colSums(chr1_hea)
+
+gc_mat = matrix(filtered_gc, nr = 50)
+GC_5K = colMeans(gc_mat)
+
+data_sample <- data.frame(GC = GC_5K, Reads_Healthy = reads_5K_h, Reads_Cancer = reads_5K_c)
+
+```
+
+```{r}
+library(ggplot2)
+library(gridExtra)  # for arranging plots
+
+# Plot for Healthy Samples
+p1 <- ggplot(data_sample, aes(x = GC, y = Reads_Healthy)) +
+  geom_point(color = 'lightblue', size = 0.5) +
+  labs(title = "GC Content vs. Reads for Healthy Samples", x = "GC Content", y = "Reads") +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0.2, 0.75)) +
+  scale_y_continuous(limits = c(0, 600))
+
+# Plot for Cancer Samples
+p2 <- ggplot(data_sample, aes(x = GC, y = Reads_Cancer)) +
+  geom_point(color = 'lightpink', size = 0.5) +
+  labs(title = "GC Content vs. Reads for Cancer Samples", x = "GC Content", y = "Reads") +
+  theme_minimal() +
+  scale_x_continuous(limits = c(0.2, 0.75)) +
+  scale_y_continuous(limits = c(0, 600))
+
+# Arrange plots vertically for comparison
+grid.arrange(p1, p2, ncol = 1)
+
+```
+
+```{r}
+library(splines)
+
+l_1h = length(reads_5K_h)
+l_1c = length(reads_5K_c)
+
+GC=GC_5K[1:l_1h]
+mod_1h = lm(reads_5K_h~bs(GC,deg = 3,knots = c(seq(0.25,0.6,0.025),0.65)),subset = (reads_5K_h>50 & reads_5K_h<600 ))
+
+
+pred_range = seq(0.2,0.75,0.01)
+resp_h = predict(mod_1h,list(GC=pred_range))
+
+preds1h = pmax(predict(mod_1h,list(GC=GC_5K)),0)
+
+
+
+
+GC=GC_5K[1:l_1c]
+mod_1c = lm(reads_5K_c~bs(GC,deg = 3,knots = c(seq(0.25,0.6,0.025),0.65)),subset = (reads_5K_c>50) & (reads_5K_c<550))
+
+pred_range = seq(0.2,0.75,0.01)
+resp_c = predict(mod_1c,list(GC=pred_range))
+preds1c = pmax(predict(mod_1c,list(GC=GC_5K)),0)
+
+```
+```{r}
+```
+
+
+
+
+
+
+```{r}
+library(ggplot2)
+
+
+# Define the correction function
+one_sample_correct <- function(samp, preds, eps) {
+  one_correct = (samp + eps) / (preds + eps)
+  adj_med = 1 / median(one_correct)
+  return(adj_med * one_correct)
+}
+
+# Define epsilon
+eps = 1
+
+# start_index = 250*3  #Bins of 5000/3=1666
+# end_index = 300*3
+
+# Applying the correction and uncorrection to the specific segment
+uncorrected_1h = one_sample_correct(reads_5K_h, rep(1, length(reads_5K_h)), eps)
+
+uncorrected_1c = one_sample_correct(reads_5K_c, rep(1, length(reads_5K_c)), eps)
+
+data_healthy <- data.frame(
+  SegmentIndex = seq( length.out = length(uncorrected_1h)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1h
+)
+
+data_cancer <- data.frame(
+  SegmentIndex = seq(length.out = length(uncorrected_1c)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1c
+)
+
+
+# Plotting Healthy Samples
+p1 <- ggplot(data_healthy, aes(x = SegmentIndex, y = UncorrectedReads)) +
+  geom_point(color = "lightblue", size=0.5) +
+  labs(title = "Healthy Samples: Uncorrected Read Distribution",
+       x = "Segment Index", y = "Read Count") +
+  theme_minimal() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black")+  # Reference line at y = 1
+  ylim(c(0,3))
+
+# Plotting Cancer Samples
+p2 <- ggplot(data_cancer, aes(x = SegmentIndex, y = UncorrectedReads)) +
+  geom_point(color = "lightpink", size=0.5) +
+  labs(title = "Cancer Samples: Uncorrected Read Distribution",
+       x = "Segment Index", y = "Read Count") +
+  theme_minimal() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black") + # Reference line at y = 1
+  ylim(c(0,3))
+
+# Using gridExtra to arrange the plots
+library(gridExtra)
+grid.arrange(p1, p2, ncol = 1)
+
+```
+
+### ב. 
+
+
+```{r}
+knots <- quantile(GC_5K, probs = c(0.25, 0.5, 0.75))
+
+model_h <- lm(reads_5K_h ~ ns(GC_5K, knots = knots), data = data_healthy)
+model_c <- lm(reads_5K_c ~ ns(GC_5K, knots = knots), data = data_cancer)
+
+
+estimate_copy_number_h <- function(Y, GC, f) {
+  # Predict using the model and create new data frame with the name used in the model
+  f_gc_hat <- predict(model_h, newdata = data.frame(GC_5K = GC))
+  # Apply the random noise multiplier
+  noise_factor <- rnorm(length(Y), 1, 0.1)
+  a_hat <- Y / (f_gc_hat * noise_factor)
+  return(a_hat)
+}
+
+estimate_copy_number_c <- function(Y, GC, f) {
+  # Predict using the model and create new data frame with the name used in the model
+  f_gc_hat <- predict(model_c, newdata = data.frame(GC_5K = GC))
+  # Apply the random noise multiplier
+  noise_factor <- rnorm(length(Y), 1, 0.1)
+  a_hat <- Y / (f_gc_hat * noise_factor)
+  return(a_hat)
+}
+
+Y_h <- reads_5K_h
+Y_c <- reads_5K_c
+
+
+estimated_copy_numbers_h <- estimate_copy_number_h(Y_h, GC_5K, model_h)
+estimated_copy_numbers_c <- estimate_copy_number_c(Y_c, GC_5K, model_c)
+
+head(estimated_copy_numbers_h)
+head(estimated_copy_numbers_c)
+
+```
+
+```{r}
+library(ggplot2)
+
+# Data frame for healthy samples
+data_healthy_plot <- data.frame(
+  Reads = reads_5K_h,
+  EstimatedCopies = estimated_copy_numbers_h
+)
+
+# Data frame for cancer samples
+data_cancer_plot <- data.frame(
+  Reads = reads_5K_c,
+  EstimatedCopies = estimated_copy_numbers_c
+)
+
+# Plotting for Healthy Samples
+p1 <- ggplot(data_healthy_plot, aes(x = Reads, y = EstimatedCopies)) +
+  geom_point(color = 'lightblue', alpha = 0.6, size=0.5) +  # Points with some transparency
+  geom_smooth(method = "lm", formula = y ~ splines::ns(x, 3), se = FALSE, color = "black", size=0.5) +  # Spline regression
+  labs(title = "Healthy Samples: Reads vs. Estimated Copy Numbers",
+       x = "Reads",
+       y = "Estimated Copy Numbers") +
+  theme_minimal()+
+  ylim(c(-1, 4))
+
+# Plotting for Cancer Samples
+p2 <- ggplot(data_cancer_plot, aes(x = Reads, y = EstimatedCopies)) +
+  geom_point(color = 'lightpink', alpha = 0.6, size=0.5) +  # Points with some transparency
+  geom_smooth(method = "lm", formula = y ~ splines::ns(x, 3), se = FALSE, color = "black", size=0.5) +  # Spline regression
+  labs(title = "Cancer Samples: Reads vs. Estimated Copy Numbers",
+       x = "Reads",
+       y = "Estimated Copy Numbers") +
+  theme_minimal()+
+  ylim(c(-1, 4))
+
+# Using gridExtra to arrange the plots if needed
+library(gridExtra)
+grid.arrange(p1, p2, ncol = 1)
+
+```
+
+### ג.
+
+```{r}
+library(ggplot2)
+
+# Create a data frame for plotting
+data_plot <- data.frame(
+  GC = GC_5K,
+  Reads_Healthy = reads_5K_h,
+  Reads_Cancer = reads_5K_c
+)
+
+# Plotting GC content effect using spline regression
+ggplot(data_plot, aes(x = GC, y = Reads_Healthy)) +
+  geom_point(color = 'lightblue', alpha = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ splines::ns(x, df = 3), se = TRUE, color = "black") +
+  labs(title = "Modeling GC Count Effect on Reads (Healthy Samples)",
+       x = "GC Count",
+       y = "Reads") +
+  theme_minimal()
+
+# Repeat for cancer samples if needed
+ggplot(data_plot, aes(x = GC, y = Reads_Cancer)) +
+  geom_point(color = 'lightpink', alpha = 0.5) +
+  geom_smooth(method = "lm", formula = y ~ splines::ns(x, df = 3), se = TRUE, color = "black") +
+  labs(title = "Modeling GC Count Effect on Reads (Cancer Samples)",
+       x = "GC Count",
+       y = "Reads") +
+  theme_minimal()
+
+```
+
+```{r}
+
+# start_index = 250*3  #Bins of 5000/3=1666
+# end_index = 300*3
+
+# Applying the correction and uncorrection to the specific segment
+uncorrected_1h = one_sample_correct(reads_5K_h, rep(1, length(reads_5K_h)), eps)
+
+uncorrected_1c = one_sample_correct(reads_5K_c, rep(1, length(reads_5K_c)), eps)
+
+data_healthy <- data.frame(
+  SegmentIndex = seq(25, 30, length.out = length(uncorrected_1h)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1h
+)
+
+data_cancer <- data.frame(
+  SegmentIndex = seq(25, 30, length.out = length(uncorrected_1c)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1c
+)
+```
+
+### ה. 
+
+```{r}
+# Function to calculate RMSE based on the given formula
+calculate_rmse <- function(estimated_copies) {
+  n <- length(estimated_copies)
+  rmse <- sqrt(sum((estimated_copies - 1)^2) / n)
+  return(rmse)
+}
+
+# Assuming 'estimated_copy_numbers_h' and 'estimated_copy_numbers_c' are your estimated copy numbers for healthy and cancer samples
+rmse_healthy <- calculate_rmse(estimated_copy_numbers_h)
+rmse_cancer <- calculate_rmse(estimated_copy_numbers_c)
+
+# Output the RMSE values
+print(paste("RMSE for Healthy Samples:", rmse_healthy))
+print(paste("RMSE for Cancer Samples:", rmse_cancer))
+
+```
+
+
+```{r}
+# Assuming 'estimated_copy_numbers_h' and 'estimated_copy_numbers_c' contain the estimated copy numbers
+# for healthy and cancer samples respectively, and true values Y_i are all 1
+
+# Calculate the absolute errors
+absolute_errors_healthy = abs(1 - estimated_copy_numbers_h)
+absolute_errors_cancer = abs(1 - estimated_copy_numbers_c)
+
+# Calculate the Median Absolute Error (MAE)
+mae_healthy = median(absolute_errors_healthy)
+mae_cancer = median(absolute_errors_cancer)
+
+# Print the MAE for both samples
+print(paste("Median Absolute Error for Healthy Samples:", mae_healthy))
+print(paste("Median Absolute Error for Cancer Samples:", mae_cancer))
+
+```
+
+
+### ו.
+
+```{r}
+two_sample_correct_e = function(cancer, healthy,eps) {
+  two_correct = (cancer+eps)/(healthy+eps)
+  two_correct_aft_med = two_correct/median(two_correct,na.rm=TRUE)
+  return(two_correct_aft_med)
+}
+
+two_sample_wout_gc = two_sample_correct_e(uncorrected_1c,uncorrected_1h,0.01)
+library(ggplot2)
+library(scales)  # for the label formatting
+
+# Assuming two_sample_wout_gc is already computed as shown earlier
+# Create a data frame with an index for plotting
+data_plot <- data.frame(
+  SegmentIndex = 1:length(two_sample_wout_gc),
+  CorrectedRatio = two_sample_wout_gc
+)
+
+# Convert index to genomic position assuming the index spans 25M to 30M
+# Let's say the total range covers 5M bases and you have N points
+total_points <- length(two_sample_wout_gc)
+base_per_point <- 5000000 / total_points  # 5M bases total range
+
+data_plot$GenomicPosition <- (data_plot$SegmentIndex - 1) * base_per_point  # 25M start
+
+# Plot using ggplot
+p1 <- ggplot(data_plot, aes(x = GenomicPosition, y = CorrectedRatio)) +
+  geom_point(color = 'darkorchid1', alpha = 0.5, size=0.5) +  # Smaller points; adjust size as needed
+  geom_hline(yintercept = 1, color = "black", linetype = "dashed") +  # Reference line at y = 1
+  labs(title = "Two Sample Correction without GC", x = "Genomic Position", y = "Read Count") +
+  theme_minimal() +
+  ylim(0, 2) +  # Set limits for y-axis
+  scale_x_continuous(labels = comma)  # Formatting x-axis labels with commas for readability
+
+
+
+# Combining the datasets for plotting
+combined_data <- rbind(data_healthy, data_cancer)
+combined_data$Type <- rep(c("Healthy", "Cancer"), each = nrow(data_healthy))
+
+# Creating the plot
+combined_plot <- ggplot(combined_data, aes(x = SegmentIndex, y = UncorrectedReads, color = Type)) +
+  geom_point(alpha = 0.3, size=0.5) +  # Plot points
+  scale_color_manual(values = c("Healthy" = "lightblue", "Cancer" = "lightpink")) +  # Set colors
+  labs(title = "One sample Correction Read Distribution",
+       x = "Segment Index", y = "Read Count") +
+  theme_minimal() +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "black") +  # Reference line at y = 1
+  ylim(c(0, 3))  # Set y-axis limits
+
+
+
+# Print the plot
+print(p1)
+print(combined_plot)
+
+grid.arrange(p1, combined_plot, ncol = 1)
+
+
+```
+POURQUOI AUTOURS DE 1 ?
+
+In the plot you're referring to, all the values cluster around the value 1 due to the method of data normalization used, specifically designed to standardize the read count distribution across different samples.
+
+### Explanation of Normalization Around 1:
+
+1. **Purpose of Normalization:**
+   Normalization is commonly used in genomic data analysis to adjust for various biases and scaling issues between samples. The goal is to make the datasets comparable by aligning them on a common scale.
+
+2. **Median Adjustment:**
+   The method likely applied here involves adjusting each observation by a factor that normalizes the median of the adjusted values to 1. This type of normalization ensures that the central tendency (median) of the read counts across different segments is consistent, helping to compare across different conditions like healthy vs. cancer samples without the interference of scale differences.
+
+3. **Use of Epsilon in Normalization:**
+   Epsilon smoothing might have been employed to stabilize the ratios, especially in segments where predicted values (e.g., based on a model or an external control) are extremely low or zero. By adding a small constant (epsilon) to both numerator and denominator, the ratio becomes more stable and less sensitive to small fluctuations in the data, reducing the impact of outliers and avoiding undefined expressions due to division by zero.
+
+4. **Application of Normalization Across Segments:**
+   Each point in the plot represents the normalized read count for a specific segment of the genome. By scaling these values around 1, it becomes easier to visually inspect the plot for anomalies or differences between healthy and cancer samples. Values significantly above or below 1 might indicate genomic regions with unusual activity or variation, such as amplifications or deletions that could be relevant to cancer research.
+
+5. **Visual Inspection:**
+   The dashed line at y=1 acts as a reference, making it straightforward to see which data points deviate from this expected baseline. This setup is particularly useful for quickly identifying segments where the read counts are unusually high or low, which could warrant further biological investigation.
+
+In summary, this normalization approach provides a standardized way to compare read counts across different samples or conditions, highlighting deviations that might be biologically significant.\
+
+
+
+
+### ה. 
+
+
+
+```{r}
+index_range <- 260000:280000  # Adjust this based on your actual data indexing
+
+# Filter data for the 25M-30M region
+filtered_reads_cancer <- reads_100_A1[index_range]
+filtered_reads_healthy <- reads_100_B1[index_range]
+filtered_gc <- GC_100[index_range]
+
+# Reshape data for plotting
+chr1_can = matrix(filtered_reads_cancer, nr = 50)
+reads_5K_c = colSums(chr1_can)
+
+chr1_hea = matrix(filtered_reads_healthy, nr = 50)
+reads_5K_h = colSums(chr1_hea)
+
+gc_mat = matrix(filtered_gc, nr = 50)
+GC_5K = colMeans(gc_mat)
+
+data_sample <- data.frame(GC = GC_5K, Reads_Healthy = reads_5K_h, Reads_Cancer = reads_5K_c)
+```
+
+
+```{r}
+
+
+
+l_1h = length(reads_5K_h)
+l_1c = length(reads_5K_c)
+
+GC=GC_5K[1:l_1h]
+mod_1h = lm(reads_5K_h~bs(GC,deg = 3,knots = c(seq(0.25,0.6,0.025),0.65)),subset = (reads_5K_h>50 & reads_5K_h<600 ))
+
+
+pred_range = seq(0.2,0.75,0.01)
+resp_h = predict(mod_1h,list(GC=pred_range))
+
+preds1h = pmax(predict(mod_1h,list(GC=GC_5K)),0)
+
+
+
+
+GC=GC_5K[1:l_1c]
+mod_1c = lm(reads_5K_c~bs(GC,deg = 3,knots = c(seq(0.25,0.6,0.025),0.65)),subset = (reads_5K_c>50) & (reads_5K_c<550))
+
+pred_range = seq(0.2,0.75,0.01)
+resp_c = predict(mod_1c,list(GC=pred_range))
+preds1c = pmax(predict(mod_1c,list(GC=GC_5K)),0)
+```
+
+
+
+
+```{r}
+
+# Define the correction function
+one_sample_correct <- function(samp, preds, eps) {
+  one_correct = (samp + eps) / (preds + eps)
+  adj_med = 1 / median(one_correct)
+  return(adj_med * one_correct)
+}
+
+# Define epsilon
+eps = 1
+
+# start_index = 250*3  #Bins of 5000/3=1666
+# end_index = 300*3
+
+# Applying the correction and uncorrection to the specific segment
+uncorrected_1h = one_sample_correct(reads_5K_h, rep(1, length(reads_5K_h)), eps)
+
+uncorrected_1c = one_sample_correct(reads_5K_c, rep(1, length(reads_5K_c)), eps)
+
+data_healthy <- data.frame(
+  SegmentIndex = seq( length.out = length(uncorrected_1h)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1h
+)
+
+data_cancer <- data.frame(
+  SegmentIndex = seq(length.out = length(uncorrected_1c)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1c
+)
+
+```
+
+
+
+```{r}
+knots <- quantile(GC_5K, probs = c(0.25, 0.5, 0.75))
+
+model_h <- lm(reads_5K_h ~ ns(GC_5K, knots = knots), data = data_healthy)
+model_c <- lm(reads_5K_c ~ ns(GC_5K, knots = knots), data = data_cancer)
+
+
+estimate_copy_number_h <- function(Y, GC, f) {
+  # Predict using the model and create new data frame with the name used in the model
+  f_gc_hat <- predict(model_h, newdata = data.frame(GC_5K = GC))
+  # Apply the random noise multiplier
+  noise_factor <- rnorm(length(Y), 1, 0.1)
+  a_hat <- Y / (f_gc_hat * noise_factor)
+  return(a_hat)
+}
+
+estimate_copy_number_c <- function(Y, GC, f) {
+  # Predict using the model and create new data frame with the name used in the model
+  f_gc_hat <- predict(model_c, newdata = data.frame(GC_5K = GC))
+  # Apply the random noise multiplier
+  noise_factor <- rnorm(length(Y), 1, 0.1)
+  a_hat <- Y / (f_gc_hat * noise_factor)
+  return(a_hat)
+}
+
+Y_h <- reads_5K_h
+Y_c <- reads_5K_c
+
+
+estimated_copy_numbers_h <- estimate_copy_number_h(Y_h, GC_5K, model_h)
+estimated_copy_numbers_c <- estimate_copy_number_c(Y_c, GC_5K, model_c)
+
+head(estimated_copy_numbers_h)
+head(estimated_copy_numbers_c)
+
+```
+
+```{r}
+
+
+# Data frame for healthy samples
+data_healthy_plot <- data.frame(
+  Reads = reads_5K_h,
+  EstimatedCopies = estimated_copy_numbers_h
+)
+
+# Data frame for cancer samples
+data_cancer_plot <- data.frame(
+  Reads = reads_5K_c,
+  EstimatedCopies = estimated_copy_numbers_c
+)
+
+
+```
+
+
+```{r}
+
+# Create a data frame for plotting
+data_plot <- data.frame(
+  GC = GC_5K,
+  Reads_Healthy = reads_5K_h,
+  Reads_Cancer = reads_5K_c
+)
+
+
+```
+
+```{r}
+
+# start_index = 250*3  #Bins of 5000/3=1666
+# end_index = 300*3
+
+# Applying the correction and uncorrection to the specific segment
+uncorrected_1h = one_sample_correct(reads_5K_h, rep(1, length(reads_5K_h)), eps)
+
+uncorrected_1c = one_sample_correct(reads_5K_c, rep(1, length(reads_5K_c)), eps)
+
+data_healthy <- data.frame(
+  SegmentIndex = seq(25, 30, length.out = length(uncorrected_1h)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1h
+)
+
+data_cancer <- data.frame(
+  SegmentIndex = seq(25, 30, length.out = length(uncorrected_1c)),  # Transform to 25M to 30M scale
+  UncorrectedReads = uncorrected_1c
+)
+```
+
+
+### ו.
+
+```{r}
+two_sample_correct_e = function(cancer, healthy,eps) {
+  two_correct = (cancer+eps)/(healthy+eps)
+  two_correct_aft_med = two_correct/median(two_correct,na.rm=TRUE)
+  return(two_correct_aft_med)
+}
+
+two_sample_wout_gc = two_sample_correct_e(uncorrected_1c,uncorrected_1h,0.01)
+library(ggplot2)
+library(scales)  # for the label formatting
+
+# Assuming two_sample_wout_gc is already computed as shown earlier
+# Create a data frame with an index for plotting
+data_plot <- data.frame(
+  SegmentIndex = 1:length(two_sample_wout_gc),
+  CorrectedRatio = two_sample_wout_gc
+)
+
+# Convert index to genomic position assuming the index spans 25M to 30M
+# Let's say the total range covers 5M bases and you have N points
+total_points <- length(two_sample_wout_gc)
+base_per_point <- 5000000 / total_points  # 5M bases total range
+
+data_plot$GenomicPosition <- (data_plot$SegmentIndex - 1) * base_per_point  # 25M start
+
+
+
+# Combining the datasets for plotting
+combined_data <- rbind(data_healthy, data_cancer)
+combined_data$Type <- rep(c("Healthy", "Cancer"), each = nrow(data_healthy))
+
+
+```
+
+
+
+
+```{r}
+# Function to calculate RMSE based on the given formula
+calculate_rmse <- function(estimated_copies) {
+  n <- length(estimated_copies)
+  rmse <- sqrt(sum((estimated_copies - 1)^2) / n)
+  return(rmse)
+}
+
+# Assuming 'estimated_copy_numbers_h' and 'estimated_copy_numbers_c' are your estimated copy numbers for healthy and cancer samples
+rmse_healthy <- calculate_rmse(estimated_copy_numbers_h)
+rmse_cancer <- calculate_rmse(estimated_copy_numbers_c)
+
+# Output the RMSE values
+print(paste("RMSE for Healthy Samples:", rmse_healthy))
+print(paste("RMSE for Cancer Samples:", rmse_cancer))
+
+```
+
+
+```{r}
+# Assuming 'estimated_copy_numbers_h' and 'estimated_copy_numbers_c' contain the estimated copy numbers
+# for healthy and cancer samples respectively, and true values Y_i are all 1
+
+# Calculate the absolute errors
+absolute_errors_healthy = abs(1 - estimated_copy_numbers_h)
+absolute_errors_cancer = abs(1 - estimated_copy_numbers_c)
+
+# Calculate the Median Absolute Error (MAE)
+mae_healthy = median(absolute_errors_healthy)
+mae_cancer = median(absolute_errors_cancer)
+
+# Print the MAE for both samples
+print(paste("Median Absolute Error for Healthy Samples:", mae_healthy))
+print(paste("Median Absolute Error for Cancer Samples:", mae_cancer))
+```
+
+
+```{r}
+
+
+knots <- quantile(GC_5K, probs = c(0.25, 0.5, 0.75))
+
+model_h <- lm(reads_5K_h ~ ns(GC_5K, knots = knots), data = uncorrected_1h)
+model_c <- lm(reads_5K_c ~ ns(GC_5K, knots = knots), data = uncorrected_1c)
+
+
+estimate_copy_number_h <- function(Y, GC, f) {
+  # Predict using the model and create new data frame with the name used in the model
+  f_gc_hat <- predict(model_h, newdata = data.frame(GC_5K = GC))
+  # Apply the random noise multiplier
+  noise_factor <- rnorm(length(Y), 1, 0.1)
+  a_hat <- Y / (f_gc_hat * noise_factor)
+  return(a_hat)
+}
+
+estimate_copy_number_c <- function(Y, GC, f) {
+  # Predict using the model and create new data frame with the name used in the model
+  f_gc_hat <- predict(model_c, newdata = data.frame(GC_5K = GC))
+  # Apply the random noise multiplier
+  noise_factor <- rnorm(length(Y), 1, 0.1)
+  a_hat <- Y / (f_gc_hat * noise_factor)
+  return(a_hat)
+}
+
+Y_h <- reads_5K_h
+Y_c <- reads_5K_c
+
+
+estimated_copy_numbers_h <- estimate_copy_number_h(Y_h, GC_5K, model_h)
+estimated_copy_numbers_c <- estimate_copy_number_c(Y_c, GC_5K, model_c)
+
+head(estimated_copy_numbers_h)
+head(estimated_copy_numbers_c)
+
+calculate_rmse <- function(estimated_copies) {
+  n <- length(estimated_copies)
+  rmse <- sqrt(sum((estimated_copies - 1)^2) / n)
+  return(rmse)
+}
+
+# Assuming 'estimated_copy_numbers_h' and 'estimated_copy_numbers_c' are your estimated copy numbers for healthy and cancer samples
+rmse_healthy <- calculate_rmse(estimated_copy_numbers_h)
+rmse_cancer <- calculate_rmse(estimated_copy_numbers_c)
+
+print(rmse_healthy)
+print(rmse_cancer)
+
+```
+```{r}
+model_corr <- lm(reads_5K_h ~ ns(GC_5K, knots = knots), data = data_plot)
+estimate_copy_number_corr <- function(Y, GC, f) {
+  # Predict using the model and create new data frame with the name used in the model
+  f_gc_hat <- predict(model_corr, newdata = data.frame(GC_5K = GC))
+  # Apply the random noise multiplier
+  noise_factor <- rnorm(length(Y), 1, 0.1)
+  a_hat <- Y / (f_gc_hat * noise_factor)
+  return(a_hat)
+}
+
+estimated_copy_numbers_cor <- estimate_copy_number_corr(Y_c, GC_5K, model_corr)
+rmse_corr <- calculate_rmse(estimated_copy_numbers_cor)
+print(rmse_corr)
+
+```
+
