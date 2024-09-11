@@ -1,0 +1,524 @@
+---
+title: "HW1"
+author: "Group 8"
+date: "7 May 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+
+<br>
+
+Group :
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+
+<br>
+
+### Libraries used :
+
+<br>
+
+
+```{r setup-packages}
+library(stringr)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+```
+
+<br>
+
+### Paths and Data :
+
+<br>
+
+```{r paths}
+
+load("C:/Users/Emmanuelle Fareau/Downloads/chr1_str_30M_50M.rda")
+
+```
+
+<br>
+
+## Introduction :
+
+<br>
+
+In this study, we want to analyze the genes of the chromosome 1 data and we focus on the region between 30 and 50 million. We want to see how the bases are distributed and if we can notice a repeating pattern and a certain coherence.
+
+
+<br>
+
+
+
+## Part 1:
+
+<br>
+
+In this question, we load the file of chromosome 1 data and focus on the region between 30 and 50 million.
+
+<br>
+
+
+
+```{r setup, include=TRUE}
+load("C:/Users/Emmanuelle Fareau/Downloads/chr1_str_30M_50M.rda")
+```
+
+<br>
+
+
+## Part 2 :
+
+
+<br>
+
+In this question we want to create a function which allows us to calculate the number of occurrences for each letter in a region of size 1000. To do this, we must create a function which allows us to enter the start variable to know on which region each time we have to concentrate.
+We use `table` to report the number of occurrences for each letter in the cell sequence.
+
+<br>
+
+
+```{r , include=TRUE}
+calculate_single_cell_counts <- function(genome_sequence, cell_size, gene_start) {
+  start_index <- gene_start
+  end_index <- min(gene_start + cell_size - 1, nchar(genome_sequence))
+  cell_sequence <- substr(genome_sequence, start_index, end_index) # extract the sequence
+  cell_base_counts <- table(strsplit(cell_sequence, "")) # count the bases in the cell sequence
+  return(cell_base_counts)
+}
+```
+
+
+<br>
+
+
+We test this function on our dataset with a cell size of 1000 bases, and a gene_start at position 100 :
+
+<br>
+
+
+```{r , include=TRUE}
+
+genome_sequence <- chr1_str_30M_50M  
+cell_size <- 1000
+gene_start <- 100  
+result <- calculate_single_cell_counts(genome_sequence, cell_size, gene_start)
+
+
+print(result)
+
+```
+
+<br>
+
+In this example of region, we can notice a more significant presence of G than of the other letters.
+
+<br>
+
+
+## Part 3 :
+
+
+<br>
+
+In this question, we want to graphically represent the distribution of all bases (A,C,G,T), using a histogram. <br>
+For that, fist of all we use `table` in the entire genomic sequence to obtain the table with the number of occurrences for each letter.  <br>
+After this, we need to transform the table that we have acquired to data frame in order to be able to use `ggplot` and create a histogram of these values.
+
+<br>
+
+
+```{r plot-bases, include=TRUE}
+
+base_counts <- table(strsplit(chr1_str_30M_50M, ""))
+
+base_data <- as.data.frame(base_counts)
+names(base_data) <- c("Base", "Frequency")
+
+plot <- ggplot(base_data, aes(x = Base, y = Frequency, fill = Base)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Base Distribution in Entire Genomic Sequence",
+       x = "Base",
+       y = "Frequency") +
+  theme_minimal()
+
+print(plot)  
+
+```
+
+
+<br>
+
+We obtained a histogram which represents the frequency of each base in our genetic sequence.
+<br>
+We can see thanks to this histogram that the bases A and T which are connected to each other have approximately the same number of occurrences and it is the same for the couple C and G.
+
+<br>
+
+
+
+
+## Part 4 : 
+
+
+<br>
+We want to create a plot for each base (A,C,G,T) and calculate for each region the number of occurrences of that base. We'll therefore obtain a plot with the place in the chromosome on the abcissa and the number of occurrences of the base concerned on the ordinate.
+<br>
+<br>
+We create function to calculate letter frequency in a sequence like in the previous question and we create an other function to divide our sequence into intervals.
+After that, we draw our histograms for each base.
+
+
+<br>
+
+```{r , include=TRUE}
+
+interval_length <- 1000 
+
+calculate_letter_frequency <- function(sequence) {
+    freq <- table(strsplit(sequence, ""))
+    expected_bases <- c("A", "C", "G", "T")
+    freq <- as.numeric(freq[expected_bases])  
+    names(freq) <- expected_bases
+    if (any(is.na(freq))) {
+        freq[is.na(freq)] <- 0  # replace NA with 0 for bases not present in the sequence slice
+    }
+    return(freq)
+}
+
+# Function to divide sequence into intervals and calculate frequencies :
+
+calculate_frequency_in_intervals <- function(sequence, interval_length) {
+    n <- nchar(sequence)
+    intervals <- seq(1, n, by = interval_length)
+    data <- tibble(
+        Start = intervals,
+        End = pmin(intervals + interval_length - 1, n),
+        Frequencies = vector("list", length(intervals))
+    )
+    for (i in seq_along(intervals)) {
+        start <- intervals[i]
+        end <- pmin(start + interval_length - 1, n)
+        subseq <- substring(sequence, start, end)
+        data$Frequencies[[i]] <- calculate_letter_frequency(subseq)
+    }
+    return(data)
+}
+
+# Calculate frequencies in intervals :
+frequencies_df <- calculate_frequency_in_intervals(genome_sequence, interval_length)
+
+# Transform list-column into a tidy format :
+
+data_long <- frequencies_df %>%
+  unnest_wider(col = Frequencies) %>%
+  pivot_longer(
+    cols = c("A", "C", "G", "T"), 
+    names_to = "Base", 
+    values_to = "Frequency"
+  ) %>%
+  mutate(Frequency = as.numeric(Frequency)) 
+
+# Plotting the data :
+ggplot(data_long, aes(x = Start, y = Frequency, color = Base)) +
+  geom_point(alpha = 0.4, size = 0.5) +
+  facet_wrap(~ Base, scales = "free_y", ncol = 1) +
+  scale_color_viridis_d() +
+  labs(title = "Frequency of Bases Across Chromosome Intervals",
+       x = "Position along chromosome (bp)",
+       y = "Frequency",
+       color = "Base") +
+  theme_minimal() +
+  theme(strip.background = element_blank(),
+        strip.text = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+<br>
+
+We obtain four plots for each base and we can now compare the occurrence of each base in each interval of our chromosome.
+<br>
+We obtain more G than T and more A than C in the same emplacement in the chromosome.
+
+
+<br>
+
+## Part 5:
+
+
+
+<br>
+
+
+Here we want to draw a scatter plot of the frequency of each base pair in the same cell.
+
+<br>
+
+```{r , include=TRUE}
+
+
+# Function to calculate base pair frequency in a sequence :
+
+calculate_base_pair_frequency <- function(sequence) {
+  bases <- strsplit(sequence, "")[[1]]
+  
+  base_pair_freq <- matrix(0, nrow = 4, ncol = 4)
+  rownames(base_pair_freq) <- colnames(base_pair_freq) <- c("A", "C", "G", "T")
+  
+  # Calculate base pair frequencies :
+  
+  for (i in 1:(length(bases) - 1)) {
+    base1 <- bases[i]
+    base2 <- bases[i + 1]
+    base_pair_freq[base1, base2] <- base_pair_freq[base1, base2] + 1
+  }
+  
+  return(base_pair_freq)
+}
+
+# Calculate base pair frequencies :
+
+base_pair_freq <- calculate_base_pair_frequency(genome_sequence)
+print(base_pair_freq)
+
+row_sums <- rowSums(base_pair_freq)  # we calculate the row sums
+
+transition_frequencies <- sweep(base_pair_freq, 1, row_sums, "/") #switch frequencies
+
+print(transition_frequencies)
+```
+
+
+<br>
+
+
+
+<br>
+
+
+
+```{r}
+
+calculate_base_frequencies <- function(genome_sequence, cell_size) {
+  num_cells <- ceiling(nchar(genome_sequence) / cell_size)
+  
+  base_frequencies <- data.frame(
+    cell = integer(),
+    A = numeric(),
+    T = numeric(),
+    C = numeric(),
+    G = numeric()
+  )
+  
+  for (i in 1:num_cells) {
+    start_index <- (i - 1) * cell_size + 1
+    end_index <- min(i * cell_size, nchar(genome_sequence))
+    cell_sequence <- substr(genome_sequence, start_index, end_index)
+    base_counts <- table(factor(strsplit(cell_sequence, "")[[1]], levels = c("A", "T", "C", "G")))
+    total_bases <- sum(base_counts)
+    base_freq <- base_counts / total_bases
+    
+    base_frequencies <- rbind(base_frequencies, data.frame(
+      cell = i,
+      A = base_freq["A"],
+      T = base_freq["T"],
+      C = base_freq["C"],
+      G = base_freq["G"]
+    ))
+  }
+  
+  return(base_frequencies)
+}
+
+
+create_scatter_plot <- function(base_frequencies, base1, base2) {
+  ggplot(base_frequencies, aes_string(x = base1, y = base2)) +
+    geom_point(color = "blue") +
+    labs(title = paste("Bases frequency", base1, "vs", base2, "per cell"),
+         x = paste("Frequency of", base1),
+         y = paste("Frequency of", base2)) +
+    theme_minimal()
+}
+
+
+identify_unusual_cells <- function(base_frequencies, threshold = 0.05) {
+  unusual_cells <- base_frequencies %>%
+    filter(A > threshold | T > threshold | C > threshold | G > threshold)
+  
+  return(unusual_cells)
+}
+
+
+base_frequencies <- calculate_base_frequencies(genome_sequence, cell_size)
+
+
+pairs <- list(c("A", "T"), c("A", "C"), c("A", "G"), c("T", "C"), c("T", "G"), c("C", "G"))
+plots <- lapply(pairs, function(pair) create_scatter_plot(base_frequencies, pair[1], pair[2]))
+
+
+for (plot in plots) {
+  print(plot)
+}
+
+```
+
+
+
+<br>
+
+### a.
+
+
+
+
+<br>
+
+
+We can see several trends:
+The higher the frequency of the T, the lower the frequency of C and G. On these two graphs we see a "decreasing" trend on both curves. We can also see that more A is present and less G and C are present respectively. 
+Regarding the increasing function trends it is more or less C with G and A with T . However there are some exceptions in each graph that we have represented
+
+
+<br>
+
+
+### b.
+
+
+<br>
+
+
+The graph of the frequency of C versus G can be considered an exception to the trend described above. We see a well-concentrated scatter of points and not really any conclusion or correlation.
+
+<br>
+
+### c.
+
+
+<br>
+
+Here, we want to observe the pair CG and see where this pair appears in our chromosome.
+
+<br>
+
+We create function to count CG pairs in a sequence and we create function to divide sequence into intervals and count CG pairs
+
+<br>
+
+```{r, include=TRUE}
+
+calculate_cg_frequency <- function(sequence) {
+  cg_count <- sum(str_count(sequence, "CG"))
+  return(cg_count)
+}
+
+calculate_cg_frequencies_in_intervals <- function(sequence, interval_length) {
+  intervals <- seq(1, nchar(sequence), by = interval_length)
+  cg_counts <- sapply(intervals, function(start) {
+    end <- min(start + interval_length - 1, nchar(sequence))
+    interval_sequence <- substr(sequence, start, end)
+    calculate_cg_frequency(interval_sequence)
+  })
+  return(cg_counts)
+}
+
+```
+
+
+<br>
+
+We use these functions with our genome data.
+
+<br>
+
+
+
+```{r, include=TRUE}
+
+interval_length <- 20000
+
+cg_frequencies <- calculate_cg_frequencies_in_intervals(genome_sequence, interval_length)
+
+interval_starts <- seq(1, by = interval_length, length.out = length(cg_frequencies))
+labels_mb <- paste0(round(interval_starts / interval_length, 2), " Mb")
+
+
+df <- data.frame(Intervals = labels_mb, Frequency = cg_frequencies)
+ggplot(df, aes(x = Intervals, y = Frequency, fill = Intervals)) +
+  geom_bar(stat = "identity", color = "salmon", show.legend = FALSE) +
+  theme_minimal() +
+  labs(title = "Frequency of 'CG' Pairs Across Intervals",
+       x = "Position on Chromosome (Mb)", y = "Frequency of 'CG'")
+
+```
+
+
+<br>
+
+
+We can see that it is not uniformly distributed and at some points there are some peaks very lows and at other points there are some peaks very high.
+
+We can see that in generally CG pairs appears consecutively.
+
+
+
+<br>
+
+
+## Part 6 :
+
+
+<br>
+
+We create a mosaic plot for base pair frequencies with the previous code to visualize and found with which bases we want to create a pair.
+
+<br>
+
+```{r, include=TRUE}
+
+mosaicplot(base_pair_freq, main = "Base Pair Frequency Mosaic Plot")
+
+```
+<br>
+
+
+If we had to divide the four bases in two pairs, we would divide them like this: "AG" and "CT" because like we can see on the mosaic that we did, the bases A and G often follow each others and the same thing for the bases C and T. It seem like they tend to be as a pair.
+
+
+<br>
+
+
+## Short summary :
+
+<br>
+
+In conclusion, this study focuses on analyzing the genes located between 30 and 50 million base pairs of chromosome 1, with a particular interest in the distribution of bases and the search for recurring and coherent patterns. 
+
+Our analyses reveal, thanks to a histogram that representing the distribution of the bases, that the bases A and T, which are often associated, have similar occurrences and they are more present. And the bases C and G are often associated.
+
+Finally, by generating plots for each base (A, C, G, T) and calculating the occurrences per region, we obtain more G than T and more A than C in the same locations in the chromosome.
+
+We found also that CG pair doesn't follow a trend like the others pairs. 
+
+These observations may suggest specific characteristics of the genomic structure in this region of chromosome 1, providing avenues for future research.
+
+
+
+<br>
+<br>
+
+
+<br>
+
