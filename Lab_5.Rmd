@@ -1,0 +1,774 @@
+---
+title: "HW5"
+author: "Group 8"
+date: "7 May 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+<br>
+
+Group:
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+<br>
+
+### Libraries used
+
+<br>
+
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(splines)
+library(data.table)
+library(caret)
+library(earth)
+
+```
+
+<br>
+
+### Paths and Data
+
+```{r paths}
+# reads_data <- "/Users/lisabensoussan/Desktop/Lab5/TCGA-13-0723-01A_lib1_all_chr1.forward"
+# chr1_reads = fread(reads_data)
+# colnames(chr1_reads) = c("Chrom","Loc","FragLen")   
+# head(chr1_reads)
+
+
+reads_data <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-01A_lib1_all_chr1.forward"
+chr1_reads = fread(reads_data)
+colnames(chr1_reads) = c("Chrom","Loc","FragLen")
+head(chr1_reads)
+
+data1 <- chr1_reads
+
+
+load("/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/chr1_line.rda")
+
+fname= "/Users/Emmanuelle Fareau/Downloads/reads_gc_5K.rda"
+load(fname)
+
+
+# reads_data <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-01A_lib1_all_chr1.forward"
+# chr1_reads = fread(reads_data)
+# colnames(chr1_reads) = c("Chrom","Loc","FragLen")   
+# head(chr1_reads)
+# 
+# 
+# data <- chr1_reads
+
+
+
+
+```
+
+## Introduction 
+
+<br>
+
+In this lab, we focus on analyzing DNA using advanced statistical methods. Here, we will fit a spline regression as well as test the effect of different division strategies into training (test) and testing (train) areas. This approach helps us better understand the structure of genomic data and identify significant patterns.
+
+<br>
+
+
+## Part 1
+
+<br>
+
+
+
+We’ll follow these steps:
+
+- Division of Data: We will create three different partitions as specified:
+	•	Division 1: Divide the area into 20 equal parts and randomly assign 14 to the training set.
+	•	Division 2: Randomly assign 70% of the data to the training set without considering the order.
+	•	Division 3: Use an orderly split where the first 70% of the data is for training and the last 30% for testing.
+	
+	<br>
+	
+- Model Fitting: Fit a spline model to the training data in each division.
+- Model Evaluation: Evaluate how well each model predicts the test data both visually and quantitatively.
+- Visualization: Plot the regression fits for both training and testing data sets.
+
+
+<br>
+
+
+### Lisa :
+
+
+```{r}
+# Setting seed for reproducibility
+# set.seed(123)
+# 
+# # Total number of observations
+# n <- nrow(chr1_reads)
+# 
+# # Division 1: Divide into 20 equal parts and select 14 randomly for training
+# n_parts <- 20
+# parts <- cut(seq(1, n), breaks = n_parts, labels = FALSE)
+# train_indices1 <- which(parts %in% sample(1:n_parts, 14))
+# train_set1 <- chr1_reads[train_indices1, ]
+# test_set1 <- chr1_reads[-train_indices1, ]
+# 
+# # Division 2: Random division into cells
+# train_indices2 <- sample(seq_len(n), size = 0.7 * n)
+# train_set2 <- chr1_reads[train_indices2, ]
+# test_set2 <- chr1_reads[-train_indices2, ]
+# 
+# # Division 3: Orderly division into cells
+# split_index <- round(0.7 * n)
+# train_set3 <- chr1_reads[1:split_index, ]
+# test_set3 <- chr1_reads[(split_index + 1):n, ]
+```
+
+
+
+
+```{r}
+# Adjust knot positions to cover the full range, including the minimum and maximum
+# adjusted_knots <- quantile(chr1_reads$Loc, probs = c(0.05, 0.35, 0.65, 0.95))
+# 
+# # Modify the fit_and_evaluate function to use natural splines and include red lines for knots
+# fit_and_evaluate_ns <- function(train, test, knots, title) {
+#   # Fit the model using natural splines
+#   model <- lm(FragLen ~ ns(Loc, knots=knots, Boundary.knots=c(min(chr1_reads$Loc), max(chr1_reads$Loc))), data=train)
+#   
+#   # Predict on training and testing set
+#   train$predicted <- predict(model, newdata=train)
+#   test$predicted <- predict(model, newdata=test)
+#   
+#   # Plot with red lines at each knot
+#   p_train <- ggplot(train, aes(x = Loc, y = FragLen)) +
+#     geom_point(aes(y = FragLen), color = "blue") +
+#     geom_line(aes(y = predicted), color = "red") +
+#     labs(title = paste("Train -", title)) +
+#     geom_vline(xintercept = knots, color = "red", linetype = "dashed")
+#   
+#   p_test <- ggplot(test, aes(x = Loc, y = FragLen)) +
+#     geom_point(aes(y = FragLen), color = "blue") +
+#     geom_line(aes(y = predicted), color = "red") +
+#     labs(title = paste("Test -", title)) +
+#     geom_vline(xintercept = knots, color = "red", linetype = "dashed")
+#   
+#   print(p_train)
+#   print(p_test)
+#   
+#   # Return model summary
+#   summary(model)
+# }
+# 
+# # Apply the modified function to each training/testing set
+# fit_and_evaluate_ns(train_set1, test_set1, adjusted_knots, "Division 1")
+# fit_and_evaluate_ns(train_set2, test_set2, adjusted_knots, "Division 2")
+# fit_and_evaluate_ns(train_set3, test_set3, adjusted_knots, "Division 3")
+
+```
+
+
+
+
+#### Essaie Emmanuelle avec data TGCA:
+
+
+##### a :
+
+<br>
+
+The code aims to partition the data into training and testing sets, fit a spline regression model, and visualize the results. 
+
+<br>
+
+It splits `data1` into 20 parts, using parts 1-14 for training and 15-20 for testing. A spline regression model is then fitted on the training data with `FragLen` as the response and `Loc` with specified knots as the predictor. The model predicts `FragLen` for both the training and test sets. Finally, the results are visualized with actual versus predicted values for the training set shown in blue and the test set in red, with knots indicated by dashed vertical lines. This process assesses the model's performance on both datasets.
+
+
+<br>
+
+
+```{r}
+# n_parts <- 20
+# data1$part <- cut(seq(1, nrow(data1)), breaks = n_parts, labels = FALSE)
+# 
+# train_parts <- 1:14
+# test_parts <- 15:20
+# 
+# train_data <- data1[data1$part %in% train_parts, ]
+# test_data <- data1[data1$part %in% test_parts, ]
+# 
+# knots <- quantile(chr1_reads$Loc, probs = c(0.05, 0.35, 0.65, 0.95))
+# model_spline <- lm(FragLen ~ bs(Loc, knots = knots), data = train_data)
+# 
+# train_predictions <- predict(model_spline, newdata = train_data)
+# test_predictions <- predict(model_spline, newdata = test_data)
+# 
+# 
+# ggplot() +
+#   geom_point(data = train_data, aes(x = Loc, y = FragLen), color = 'blue', alpha = 0.5) +
+#   geom_line(data = train_data, aes(x = Loc, y = train_predictions), color = 'blue') +
+#   geom_point(data = test_data, aes(x = Loc, y = FragLen), color = 'red', alpha = 0.5) +
+#   geom_line(data = test_data, aes(x = Loc, y = test_predictions), color = 'red') +
+#   geom_vline(xintercept = knots, linetype = "dashed", color = "black") +
+#   labs(title = "Spline regression for the case א.a",
+#        x = "Loc",
+#        y = "FragLen") +
+#   theme_minimal()
+```
+
+
+
+##### b :
+
+<br>
+
+The code aims to partition the data into training and testing sets, fit a spline regression model, and visualize the results. It sets a random seed for reproducibility and splits the data by creating a partition where 70% is used for training and 30% for testing without considering the order. A spline regression model is fitted on the training data with `FragLen` as the response and `Loc` with specified knots as the predictor. The model's performance is then evaluated by predicting `FragLen` for both training and test sets. The results are visualized with actual versus predicted values for the training set shown in blue and the test set in red, assessing the model's performance on both datasets.
+
+<br>
+
+```{r}
+# set.seed(123)
+# train_indices <- createDataPartition(data1$FragLen, p = 0.7, list = FALSE)
+# train_data <- data[train_indices, ]
+# test_data <- data[-train_indices, ]
+# 
+# knots <- quantile(chr1_reads$Loc, probs = c(0.05, 0.35, 0.65, 0.95))
+# model_spline <- lm(FragLen ~ ns(Loc, knots = knots), data = train_data)
+# print(model_spline)
+# 
+# train_predictions <- predict(model_spline, newdata = train_data)
+# test_predictions <- predict(model_spline, newdata = test_data)
+# 
+# ggplot() +
+#   geom_point(data = train_data, aes(x = Loc, y = FragLen), color = 'blue', alpha = 0.5) +
+#   geom_line(data = train_data, aes(x = Loc, y = train_predictions), color = 'blue') +
+#   geom_point(data = test_data, aes(x = Loc, y = FragLen), color = 'red', alpha = 0.5) +
+#   geom_line(data = test_data, aes(x = Loc, y = test_predictions), color = 'red') +
+#   labs(title = "Spline regression for the case א.b",
+#        x = "Loc",
+#        y = "FragLen") +
+#   theme_minimal()
+```
+
+<br>
+
+
+##### c :
+
+<br>
+
+
+The code aims to partition the data into training and testing sets, fit a spline regression model, and visualize the results. It sets a random seed for reproducibility and splits the data by creating a partition where 70% is used for training and 30% for testing with considering the order. A spline regression model is fitted on the training data with `FragLen` as the response and `Loc` with specified knots as the predictor. The model's performance is then evaluated by predicting `FragLen` for both training and test sets. The results are visualized with actual versus predicted values for the training set shown in blue and the test set in red, assessing the model's performance on both datasets.
+
+
+<br>
+
+
+```{r}
+# n_total <- nrow(data1)
+# n_train <- round(0.7 * n_total)
+# n_test <- n_total - n_train
+# 
+# train_data <- data1[1:n_train, ]
+# test_data <- data1[(n_train + 1):n_total, ]
+# 
+# knots <- quantile(chr1_reads$Loc, probs = c(0.05, 0.35, 0.65, 0.95))
+# model_spline <- lm(FragLen ~ bs(Loc, knots = knots), data = train_data)
+# 
+# train_predictions <- predict(model_spline, newdata = train_data)
+# test_predictions <- predict(model_spline, newdata = test_data)
+# 
+# 
+# ggplot() +
+#   geom_point(data = train_data, aes(x = Loc, y = FragLen), color = 'blue', alpha = 0.5) +
+#   geom_line(data = train_data, aes(x = Loc, y = train_predictions), color = 'blue', size = 1.5) +
+#   geom_point(data = test_data, aes(x = Loc, y = FragLen), color = 'red', alpha = 0.5) +
+#   geom_line(data = test_data, aes(x = Loc, y = test_predictions), color = 'red', size = 1.5) +
+#   geom_vline(xintercept = knots, linetype = "dashed", color = "black", size = 1) +
+#   labs(title = "Spline regression for the case א.c",
+#        x = "Loc",
+#        y = "FragLen") +
+#   theme_minimal()
+```
+
+<br>
+
+### GC count :
+
+<br>
+
+The code aims to segment a DNA sequence, calculate GC content for each segment, and clean the resulting data by removing outliers. First, it converts the DNA sequence to a character vector and reads coverage values as numeric. The sequence is then divided into segments based on the length of the reads coverage array. For each segment, the GC content is calculated. These GC content values are combined with the coverage values into a dataframe, and any missing values are removed. To clean the data, a polynomial regression model is fitted, residuals are calculated, and outliers are removed based on a threshold of three standard deviations from the residuals. The cleaned data is then returned for further analysis.
+
+<br>
+
+
+```{r}
+
+sequence <- chr1_line
+sequence <- as.character(sequence)
+
+reads_5K <- as.numeric(reads_5K)
+
+segment_length <- floor(length(sequence) / length(reads_5K))
+num_segments <- length(reads_5K)
+
+segments <- split(sequence, rep(1:num_segments, each = segment_length, length.out = length(sequence)))
+
+calculate_gc_content <- function(seq) {
+  gc_count <- sum(seq == "G" | seq == "C")
+  return(gc_count)
+}
+
+
+gc_contents <- sapply(segments, calculate_gc_content)
+
+
+stopifnot(length(gc_contents) == length(reads_5K))
+
+data <- data.frame(gc_content = gc_contents, coverage = reads_5K)
+data <- na.omit(data)
+
+remove_outliers <- function(data) {
+  model <- lm(coverage ~ poly(gc_content, 3), data = data)
+  residuals <- residuals(model)
+  data$residuals <- residuals
+  threshold <- 3 * sd(data$residuals, na.rm = TRUE)
+  
+  cleaned_data <- data %>%
+    filter(abs(residuals) <= threshold)
+  
+  return(cleaned_data)
+}
+
+data <- remove_outliers(data)
+
+```
+
+<br>
+
+
+### a :
+
+<br>
+
+
+The code aims to partition the data into training and testing sets, fit a spline regression model, and visualize the results. 
+
+<br>
+
+We split the data into 20 parts, using parts 1-14 for training and 15-20 for testing. We fit then a spline regression model on the training data with coverage as the response and gc_content with specified knots as the predictor. 
+
+<br>
+
+The model's performance is evaluated by predicting coverage (our y) for both training and test sets. The results are visualized with actual versus predicted values for the training set shown in blue and the test set in red, with knots indicated by dashed vertical lines, assessing the model's performance on both datasets.
+
+<br>
+
+
+```{r}
+n_parts <- 20
+data$part <- cut(seq(1, nrow(data)), breaks = n_parts, labels = FALSE)
+
+train_parts <- 1:14
+test_parts <- 15:20
+
+train_data_1 <- data[data$part %in% train_parts, ]
+test_data_1 <- data[data$part %in% test_parts, ]
+
+knots <- quantile(data$gc_content, probs = c(0.05, 0.35, 0.65, 0.95))
+model_spline <- lm(coverage ~ ns(gc_content, knots = knots), data = train_data_1)
+
+train_predictions_1 <- predict(model_spline, newdata = train_data_1)
+test_predictions_1 <- predict(model_spline, newdata = test_data_1)
+
+
+ggplot() +
+  geom_point(data = train_data_1, aes(x = gc_content, y = coverage), color = 'cyan2', alpha = 0.5) +
+  geom_line(data = train_data_1, aes(x = gc_content, y = train_predictions_1), color = 'grey', size = 1.5) +
+  geom_point(data = test_data_1, aes(x = gc_content, y = coverage), color = 'purple', alpha = 0.5) +
+  geom_line(data = test_data_1, aes(x = gc_content, y = test_predictions_1), color = 'grey', size = 1.5) +
+  geom_vline(xintercept = knots, linetype = "dashed", color = "black", size = 1) +
+  labs(title = "Spline regression for the case א.a",
+       x = "Gc count",
+       y = "Coverage") +
+  theme_minimal()
+
+
+```
+
+<br>
+
+
+### b :
+
+<br>
+
+
+The code aims to partition the data into training and testing sets, fit a spline regression model, and visualize the results. 
+
+<br>
+
+We split the data by creating a partition where 70% is used for training and 30% for testing without considering the order. We fit then a spline regression model on the training data with coverage as the response and gc_content with specified knots as the predictor. 
+
+<br>
+
+The model's performance is evaluated by predicting coverage (our y) for both training and test sets. The results are visualized with actual versus predicted values for the training set shown in blue and the test set in red, with knots indicated by dashed vertical lines, assessing the model's performance on both datasets.
+
+<br>
+
+
+```{r}
+set.seed(123)
+train_indices2 <- createDataPartition(data$coverage, p = 0.7, list = FALSE)
+train_data2 <- data[train_indices2, ]
+test_data2 <- data[-train_indices2, ]
+
+
+knots <- quantile(data$gc_content, probs = c(0.05, 0.35, 0.65, 0.95))
+model_spline2 <- lm(coverage ~ ns(gc_content, knots = knots), data = train_data2)
+print(model_spline2)
+
+train_predictions_2 <- predict(model_spline2, newdata = train_data2)
+test_predictions_2 <- predict(model_spline2, newdata = test_data2)
+
+
+ggplot() +
+  geom_point(data = train_data2, aes(x = gc_content, y = coverage), color = 'cyan2', alpha = 0.5) +
+  geom_line(data = train_data2, aes(x = gc_content, y = train_predictions_2), color = 'grey', size = 1.5) +
+  geom_point(data = test_data2, aes(x = gc_content, y = coverage), color = 'purple', alpha = 0.5) +
+  geom_line(data = test_data2, aes(x = gc_content, y = test_predictions_2), color = 'grey', size = 1.5) +
+  geom_vline(xintercept = knots, linetype = "dashed", color = "black", size = 1) +
+  labs(title = "Spline regression for the case א.b",
+       x = "GC Count",
+       y = "Coverage") +
+  theme_minimal()
+
+```
+
+<br>
+
+### c :
+
+<br>
+
+
+The code aims to partition the data into training and testing sets, fit a spline regression model, and visualize the results. 
+
+<br>
+
+We split the data by creating a partition where 70% is used for training and 30% for testing without considering the order. We fit then a spline regression model on the training data with coverage as the response and gc_content with specified knots as the predictor. 
+
+<br>
+
+The model's performance is evaluated by predicting coverage (our y) for both training and test sets. The results are visualized with actual versus predicted values for the training set shown in blue and the test set in red, with knots indicated by dashed vertical lines, assessing the model's performance on both datasets.
+
+<br>
+
+```{r}
+n_total <- nrow(data)
+n_train_3 <- round(0.7 * n_total)
+n_test_3 <- n_total - n_train_3
+
+train_data_3 <- data[1:n_train_3, ]
+test_data_3 <- data[(n_train_3 + 1):n_total, ]
+
+knots <- quantile(data$gc_content, probs = c(0.05, 0.35, 0.65, 0.95))
+model_spline_3 <- lm(coverage ~ ns(gc_content, knots = knots), data = train_data_3)
+
+train_predictions_3 <- predict(model_spline_3, newdata = train_data_3)
+test_predictions_3 <- predict(model_spline_3, newdata = test_data_3)
+
+
+ggplot() +
+  geom_point(data = train_data_3, aes(x = gc_content, y = coverage), color = 'cyan2', alpha = 0.5) +
+  geom_line(data = train_data_3, aes(x = gc_content, y = train_predictions_3), color = 'grey', size = 1.5) +
+  geom_point(data = test_data_3, aes(x = gc_content, y = coverage), color = 'purple', alpha = 0.5) +
+  geom_line(data = test_data_3, aes(x = gc_content, y = test_predictions_3), color = 'grey', size = 1.5) +
+  geom_vline(xintercept = knots, linetype = "dashed", color = "black", size = 1) +
+  labs(title = "Spline regression for the case",
+       x = "GC Count",
+       y = "Coverage") +
+  theme_minimal()
+```
+
+
+<br>
+
+
+## Part 2
+
+<br>
+
+From the data and results obtained, it's clear that the training models vary considerably across different data divisions, influencing both their fit on the training data and their performance on the test data.
+
+### Observations and Analysis:
+
+1. **Model Fit and Consistency:**
+   - **Training Data:** The models fit the training data with varying degrees of accuracy, evident from the spread and alignment of points around the regression line.
+   - **Testing Data:** The test data often shows a significant deviation from the training regression line, indicating that the model may not generalize well outside the training set, particularly in divisions where training data is not representative of the overall dataset.
+
+2. **Division Differences:**
+   - **Division 1:** Random division into 20 parts with 14 randomly chosen for training provided a diverse range of data points for training but may include an uneven representation of the underlying patterns.
+   - **Division 2:** Random selection of 70% of data for training offered a more blended mix, likely capturing a more average model behavior but potentially missing systematic variations at the extremes.
+   - **Division 3:** Using the first 70% of data for training mostly captures one segment of the data's distribution, potentially biasing the model towards the characteristics of that segment only.
+
+3. **Performance Metrics:**
+   - The residual errors and standard deviations indicate significant variation, suggesting that the spline models may not capture all underlying patterns or may be too sensitive to outliers and noise within the segments.
+
+### Key Takeaways:
+
+The difference in model performance across training and testing sets suggests issues with overfitting in certain divisions, particularly where training data does not well-represent the overall data distribution.
+<br>
+The strategy used to divide the data into training and testing sets substantially impacts model performance, indicating the importance of considering how data is partitioned in model training to avoid biased or underperforming models.
+<br>
+The placement of knots at fixed quantiles helped provide structure to the model across different segments of the data but also highlighted the limitations of using fixed locations when the data distribution is uneven.
+
+
+
+<br>
+
+
+## Part 3
+
+
+<br>
+
+Using a validation set allows the performance of the model to be evaluated objectively. If the model is evaluated only on the training data, it is possible that it is too adapted (overfitting) to the particularities of this data and does not generalize well to new data.
+
+By separating the data into training and testing sets, one can check whether the model is able to generalize the trends learned from the training set to data it has never seen before. This helps identify if the model is too complex and fits the training data too closely.
+
+The validation set allows different versions of the model or different models to be compared to each other on the same objective basis, i.e. data that they did not use for training.
+
+We calculate the RMSE for train and test for each model to be able to determine which is the best model.
+<br>
+
+
+```{r}
+rmse_train_a <- sqrt(mean((train_predictions_1 - train_data_1$coverage)^2))
+rmse_test_a <- sqrt(mean((test_predictions_1 - test_data_1$coverage)^2))
+
+cat("RMSE for the train set (case א.a): ", rmse_train_a, "\n")
+cat("RMSE for the test set (case א.a): ", rmse_test_a, "\n")
+```
+```{r}
+rmse_train_b <- sqrt(mean((train_predictions_2 - train_data2$coverage)^2))
+rmse_test_b <- sqrt(mean((test_predictions_2 - test_data2$coverage)^2))
+
+cat("RMSE for the train set (case א.b): ", rmse_train_b, "\n")
+cat("RMSE for the test set (case א.b): ", rmse_test_b, "\n")
+```
+
+
+```{r}
+rmse_train_c <- sqrt(mean((train_predictions_3 - train_data_3$coverage)^2))
+rmse_test_c <- sqrt(mean((test_predictions_3 - test_data_3$coverage)^2))
+
+cat("RMSE pour l'ensemble d'entraînement (cas א.c): ", rmse_train_c, "\n")
+cat("RMSE pour l'ensemble de test (cas א.c): ", rmse_test_c, "\n")
+
+```
+```{r}
+diff_a <- abs(rmse_train_a - rmse_test_a)
+diff_b <- abs(rmse_train_b - rmse_test_b)
+diff_c <- abs(rmse_train_c - rmse_test_c)
+
+
+results <- data.frame(
+  Case = c("א.a", "א.b", "א.c"),
+  RMSE_Train = c(rmse_train_a, rmse_train_b, rmse_train_c),
+  RMSE_Test = c(rmse_test_a, rmse_test_b, rmse_test_c),
+  Difference = c(diff_a, diff_b, diff_c)
+)
+
+
+print(results)
+```
+
+<br>
+
+
+* Comparaison between our 3 models :
+
+Case א.b has the smallest difference between training and testing RMSEs (0.3082633), suggesting that this model is the most stable and has the best generalization performance.
+The training and testing RMSEs for case א.b are also very close, indicating that this model does not overlearn the training data.
+Therefore, the best model based on stability and generalization performance is that of case א.b.
+
+
+
+<br>
+
+
+
+## Part 4
+
+<br>
+
+In this part, we draw 3 residuals graphs according to the explanatory variable, the predicted variable and the location of the chromosome (interval in question). 
+
+<br>
+
+```{r}
+residuals_train <- train_data2$coverage - train_predictions_2
+
+residuals_test <- test_data2$coverage - test_predictions_2
+
+head(residuals_train)
+head(residuals_test)
+```
+
+<br>
+
+```{r}
+
+train_predictions_2 <- predict(model_spline2, newdata = train_data2)
+test_predictions_2 <- predict(model_spline2, newdata = test_data2)
+
+
+head(train_predictions_2)
+head(test_predictions_2)
+
+
+train_indices <- as.numeric(rownames(train_data2))
+test_indices <- as.numeric(rownames(test_data2))
+
+train_df <- data.frame(Index = train_indices, y_pred = train_predictions_2)
+test_df <- data.frame(Index = test_indices, y_pred = test_predictions_2)
+
+
+combined_df <- rbind(train_df, test_df)
+
+
+combined_df <- combined_df[order(combined_df$Index), ]
+head(combined_df)
+
+
+comparison <- data.frame(x_values = data$gc_content, y_true = data$coverage, y_pred = combined_df$y_pred)
+
+
+comparison$errors <- comparison$y_true - comparison$y_pred
+print(head(comparison))
+
+```
+
+<br>
+
+We draw the graphs :
+
+<br>
+
+```{r}
+
+residuals_train_df <- data.frame(gc_content = train_data2$gc_content, residuals = residuals_train)
+
+residuals_test_df <- data.frame(gc_content = test_data2$gc_content, residuals = residuals_test)
+
+ggplot() +
+  geom_point(data = residuals_train_df, aes(x = gc_content, y = residuals), color = 'purple', alpha = 0.5) +
+  geom_point(data = residuals_test_df, aes(x = gc_content, y = residuals), color = 'yellow', alpha = 0.5) +
+  labs(title = "Residuals vs GC Content",
+       x = "GC Content",
+       y = "Residuals") +
+  theme_minimal()
+
+```
+
+<br>
+
+We can see that a small trend emerges for the first graph and that the greater the number of CG and the more the residual will be .
+
+<br>
+
+```{r}
+ggplot() +
+  geom_point(data = residuals_train_df, aes(x = train_predictions_2, y = residuals), color = 'purple', alpha = 0.5) +
+  geom_point(data = residuals_test_df, aes(x = test_predictions_2, y = residuals), color = 'yellow', alpha = 0.5) +
+  labs(title = "Residuals vs Y predict",
+       x = "Y predict",
+       y = "Residuals") +
+  theme_minimal()
+```
+
+<br>
+
+As for the second graph, we can see that the larger the Y predit and the smaller the residual.
+
+<br>
+
+```{r}
+residuals_train_df <- residuals_train_df %>%
+  mutate(index = row_number())
+
+residuals_test_df <- residuals_test_df %>%
+  mutate(index = row_number())
+
+# Tracer les résidus en fonction de l'index
+ggplot() +
+  geom_point(data = residuals_train_df, aes(x = index, y = residuals), color = 'purple', alpha = 0.5) +
+  geom_point(data = residuals_test_df, aes(x = index, y = residuals), color = 'yellow', alpha = 0.5) +
+  labs(title = "Residuals vs Index (Position in Chromosome)",
+       x = "Index",
+       y = "Residuals") +
+  theme_minimal()
+```
+
+<br>
+
+Finally in the third graph we do not really observe a trend that 
+
+<br>
+
+## b:
+
+<br>
+
+
+
+```{r}
+
+cat("RMSE pour l'ensemble d'entraînement :", rmse_train_c, "\n")
+cat("RMSE pour l'ensemble de test :", rmse_test_c, "\n")
+
+ggplot() +
+  geom_point(data = train_data2, aes(x = gc_content, y = coverage), color = 'green', alpha = 0.5) +
+  geom_line(data = train_data2, aes(x = gc_content, y = train_predictions_2), color = 'darkblue', size = 1.5) +
+  geom_point(data = test_data2, aes(x = gc_content, y = coverage), color = 'yellow', alpha = 0.5) +
+  geom_line(data = test_data2, aes(x = gc_content, y = test_predictions_2), color = 'darkred', size = 1.5) +
+  geom_vline(xintercept = knots, linetype = "dashed", color = "black", size = 1) +
+  labs(title = "Spline regression for the case א.b",
+       x = "GC Content",
+       y = "Coverage") +
+  theme_minimal()
+
+```
+
+<br>
+
+The trend line (קו מגמה) seems to represent the general relationship well but could be improved to better capture local variations.
+The conditional mean line (קו התוחלת המותנית) could be refined with more complex models or regularization techniques.
+
+So, while the trend line enhances the general understanding, it can be further improved by exploring more complex models and optimizing the spline regression parameters.
+
+<br>
+
+
+## Short summary
+
+<br>
+
+In this work, we wanted to know if the fact of distributing the data in 3 different ways would help us to choose the best possible approximation of our link between the number of reads and the number of GCs . We have tested 3 methods and have determined that a random distribution of 70% for training and 30% for testing bring us the greatest precision . We then drew the residus graphs according to several variables. Finally, we compared the line of the conditional esperance with the prediction line.
+
+
+<br>
+
+
+
+
