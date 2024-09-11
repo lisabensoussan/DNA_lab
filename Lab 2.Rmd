@@ -1,0 +1,421 @@
+---
+title: "HW2"
+author: "Group 8"
+date: "28 May 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+
+<br>
+
+Group :
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+
+<br>
+
+### Libraries used :
+
+<br>
+
+
+
+```{r setup-packages}
+if (!require('data.table')){
+  install.packages('data.table')
+  library('data.table')
+}
+
+library('tictoc')
+
+if (!require('manipulate')){
+  install.packages('manipulate')
+  library('manipulate')
+}
+
+if (!require("fitdistrplus")) install.packages("fitdistrplus")
+
+library(data.table)
+library(ggplot2)
+library(fitdistrplus)
+
+```
+
+<br>
+
+### Paths and Data :
+
+<br>
+
+We are loading the data in our R file.
+
+<br>
+
+```{r paths}
+
+reads_file <- "/Users/lisabensoussan/Desktop/Lab2/TCGA-13-0723-01A_lib1_all_chr1.forward"
+```
+
+<br>
+
+## Introduction :
+
+<br>
+
+
+In this exercise we are interested in the frequency of appearance of the number of reads in the positions on chromosome 1 . We try to see if there is something that repeats according to their distribution. The goal will also be to agree to this distribution the normal law that is most approaching.
+
+
+
+
+<br>
+
+
+
+## Part 1:
+
+<br>
+
+We use `fread` to read data. Then, we use `head` to get an overview of our data and see if it downloaded correctly.
+
+<br>
+
+```{r , include=TRUE}
+
+chr1_reads = fread(reads_file)
+
+head(chr1_reads)
+
+```
+
+<br>
+
+We rename columns of our data with `colnames` to make it easier to use and understand.
+
+<br>
+
+
+```{r , include=TRUE}
+colnames(chr1_reads) = c("Chrom","Loc","FragLen")   
+head(chr1_reads)
+```
+
+
+<br>
+
+
+<br>
+
+```{r , include=TRUE}
+chr1_reads[sample(nrow(chr1_reads),10)] #Just consider a simple of size 10
+```
+
+
+<br>
+
+Our goal in this part is to  create a function that takes two parameters: a start point and an end point. It calculates for each base between the two points the number of fragments beginning with this point.
+
+<br>
+
+For this, we create function to count the start of fragments. In this function, we filter  the data for the specific chromosome and range, we create a vector for counts initialized to zero, then we tabulate starts within the range with function `table`. After this, we place counter in the corresponding positions.
+
+
+<br>
+
+
+```{r , include=TRUE}
+
+count_fragment_starts <- function(data, chrom_number, start_range, end_range) {
+  relevant_data <- data[Chrom == chrom_number & Loc >= start_range & Loc <= end_range,]
+  start_counts <- integer(end_range - start_range + 1)
+  names(start_counts) <- as.character(start_range:end_range)
+  
+  starts <- table(relevant_data$Loc)
+  
+  start_positions <- as.character(names(starts))
+  start_counts[start_positions] <- as.integer(starts)
+  
+  return(start_counts)
+}
+
+```
+
+<br>
+
+Thanks to this function, we do the sum of fragments and printing the results. 
+<br>
+
+```{r , include=TRUE}
+
+tic()
+fragment_counts <- count_fragment_starts(chr1_reads, 1, 0, 20000000)
+toc()
+
+total_fragments <- sum(fragment_counts)
+total_fragments
+
+# Example of using the function on a smaller range for demonstration
+small_range_counts <- count_fragment_starts(chr1_reads, 1, 0, 1000)
+print(small_range_counts)
+
+# Measure the execution time for a smaller area
+tic()
+small_range_counts <- count_fragment_starts(chr1_reads, 1, 0, 1000)
+toc()
+```
+
+
+
+<br>
+
+We successfully loaded the data and renamed the columns for better clarity. By examining a sample of the data, we ensured its integrity and correctness. We then developed a function, count_fragment_starts, which efficiently counts the number of fragments starting at each base within a specified range. Most of them are 0, but there are some 1 and 3 and very fews 3. 
+
+<br>
+
+
+## Part 2 :
+
+<br>
+
+In this part, our aim  is to create an histogram which represents the frequencies of the number of reads linked to bases . 
+
+<br>
+
+
+```{r , include=TRUE, warning=FALSE}
+last_read <- max(chr1_reads$Loc)
+total_reads <- nrow(chr1_reads)
+
+coverage_estimate <- total_reads / last_read
+beg_region <- 1
+end_region <- 10000000
+N <- end_region - beg_region + 1  # Total number of positions in the region of interest
+read_starts <- rep(0, N)
+
+
+tic()
+filtered_reads <- chr1_reads[Loc >= beg_region & Loc <= end_region, .(Loc)]
+for (r in filtered_reads$Loc) {
+    read_starts[r - beg_region + 1] <- read_starts[r - beg_region + 1] + 1
+}
+toc()
+
+coverage_data <- data.frame(Position = beg_region:end_region, ReadStarts = read_starts)
+
+ggplot(coverage_data, aes(x = ReadStarts)) +
+  geom_histogram(binwidth = 1, fill = "blue", color = "black") +
+  labs(title = "Histogram of Read Start Frequencies",
+       x = "Read Start Frequency",
+       y = "Count of Positions") +
+  theme_minimal() +
+  geom_text(stat='count', aes(label=..count..), vjust=-0.5, check_overlap = TRUE)
+
+```
+
+<br>
+
+We calculated the read start frequencies across the first 10 million bases of chromosome 1. Using these frequencies, we generated a histogram to visualize the distribution. The histogram revealed that the majority of positions have a low frequency of read starts, with a few positions having significantly higher counts. This indicates a non-uniform distribution of reads across the analyzed region.
+
+<br>
+
+
+# Part 3 :
+
+
+<br>
+
+
+
+In this section, we want to create a function that calculates the sums of fragment lengths per cell.      <br>
+
+So to do this we create a variable cell size and we will divide our data according to this variable. Then we calculate the sum of the fragments.
+We create a new column `TotalFragLen` which contains the sum of the fragment lengths (FragLen) for each cell.
+
+
+<br>
+
+```{r , include=TRUE}
+summarize_fragments <- function(chr1_reads, cell_size) {
+
+  chr1_reads[, Cell := floor(Loc / cell_size)]
+  
+  result <- chr1_reads[, .(TotalFragLen = sum(FragLen)), by = Cell]
+  
+  return(result)
+}
+
+```
+
+<br>
+
+We test our function on our data and with cell size of 50 000.
+
+<br>
+
+```{r, warning=FALSE}
+result <- summarize_fragments(chr1_reads, 50000)
+print(result)
+```
+
+<br>
+
+So, we obtain a new data frame with the number of fragments for each cell (with cell size equal to 50 000).
+
+<br>
+
+
+# Question a :
+
+
+<br>
+
+We want to create a graph describing the distribution on the chromosome with the number of fragments in relation to the location of the cells. <br>
+So we use the function that we have create in the previous question and apply `ggplot` function.
+
+<br>
+
+
+```{r , include=TRUE}
+ggplot(result, aes(x = Cell, y = TotalFragLen)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  labs(title = "Distribution of fragments on chromosome 1",
+       x = "Cell",
+       y = "Sum of fragment lengths") +
+  theme_minimal()
+```
+
+
+<br>
+
+We obtain a plot with the number of fragments for each cell. We can see that there are some cells with a large number of fragments and others with almost no fragments, but the majority of cells have a number of fragments that are all in the same interval.
+
+<br>
+
+
+# Question b :
+
+<br>
+
+We would like to present a second graph representing the distribution in a window of 20 million bases (a zoom in on the first), which will allow us to better understand the distribution of the number of fragments.
+
+<br>
+
+We define the window star, window end and the cell size. We calculate the cell number corresponding to the end of the window with $\frac{window \: end}{cell size}$. Then, we filter data for the 20 million base window.
+
+After this, we can create our plot with `ggplot`.
+
+<br>
+
+
+```{r}
+
+cell_size <- 50000
+window_start <- 0
+window_end <- 20000000
+
+cell_end <- window_end / cell_size
+
+filtered_result <- result[Cell >= window_start & Cell <= cell_end]
+
+ggplot(filtered_result, aes(x = Cell, y = TotalFragLen)) +
+  geom_bar(stat = "identity", fill = "green") +
+  labs(title = "Distribution of fragments on chromosome 1 (Zoomed to 20 million bases)",
+       x = "Cell",
+       y = "Sum of fragment lengths") +
+  theme_minimal()
+
+```
+
+
+<br>
+
+Thanks to this zoom, we can to see with more precision the plot and to better understand the distribution of the number of fragments.
+We can notice a spike in the number of fragments towards cells 330 to 340.
+And around cells 60 and 260 we can notice a total absence of peak.
+
+
+<br>
+
+
+# Part 4 :
+
+
+<br>
+
+We want to study the marginal distribution of the number of reads in the cell. For this we create a plot with our data `results` that we had create in a previous question.
+
+<br>
+
+
+```{r , include=TRUE, warning=FALSE}
+ggplot(coverage_data, aes(x = ReadStarts)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "black") +
+  labs(title = "Marginal distribution of the number of reads per cell",
+       x = "Number of reads per cell",
+       y = "Density") +
+  theme_minimal()
+```
+
+<br>
+
+We want to fit a normal distribution to the data. For this we use the `fitdist` function in R.
+Then we add the fitted normal distribution curve to the graph created previously.
+
+<br>
+
+```{r , include=TRUE, warning=FALSE, message=FALSE}
+
+fit <- fitdist(coverage_data$ReadStarts, "norm")
+
+ggplot(coverage_data, aes(x = ReadStarts)) +
+  geom_histogram(aes(y = ..density..), bins = 30, fill = "skyblue", color = "black") +
+  stat_function(fun = dnorm, args = list(mean = fit$estimate["mean"], sd = fit$estimate["sd"]), color = "magenta3", size = 1) +
+  labs(title = "Fitting the normal distribution to the number of reads per cell",
+       x = "Number of reads per cell",
+       y = "Density") +
+  theme_minimal()
+
+
+print(fit)
+
+```
+
+
+<br>
+
+The density curve follows the shape of the histogram well, this indicates that the normal distribution is not a good fit for the data.
+
+<br>
+
+
+
+
+## Short summary :
+
+<br>
+
+
+In this exercise, we aimed to analyze the distribution of read fragments on chromosome 1 to identify any recurring patterns. Our analysis was divided into several key parts, each contributing to a comprehensive understanding of the data.
+
+Overall, our analysis highlighted the non-uniform distribution of read fragments along chromosome 1. The variability in fragment counts across cells and the fit of a normal distribution to the number of reads per cell provide insights into the underlying patterns of our genomic data. This study showcases the importance of thorough data exploration and visualization in understanding complex biological datasets.
+
+By following the structured approach outlined in this document, we were able to effectively analyze and interpret the distribution of read fragments, providing a solid foundation for further genomic studies.
+
+
+
+<br>
+
+
+
+<br>
+
+<br>
+
