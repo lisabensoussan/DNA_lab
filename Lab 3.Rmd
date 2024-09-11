@@ -1,0 +1,570 @@
+---
+title: "HW3"
+author: "Group 8"
+date: "28 May 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+
+<br>
+
+Group :
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+
+<br>
+
+### Libraries used :
+
+<br>
+
+
+
+```{r setup-packages, message=FALSE}
+library(data.table)
+library(ggplot2)
+library('tictoc')
+library(stringr)
+library (tidyverse)
+library(stringr)
+library(tidyr)
+
+```
+
+<br>
+
+### Paths and Data :
+
+<br>
+
+We are loading the data in our R file.
+
+<br>
+
+```{r paths}
+load("/Users/lisabensoussan/Desktop/Lab3/chr1_line.rda")
+
+reads_file <- "/Users/lisabensoussan/Desktop/Lab3/TCGA-13-0723-01A_lib1_all_chr1.forward"
+chr1_reads = fread(reads_file)
+
+colnames(chr1_reads) = c("Chrom","Loc","FragLen")   
+head(chr1_reads)
+
+
+
+
+#load("/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/chr1_line.rda")
+```
+
+<br>
+
+## Introduction :
+
+<br>
+
+
+In this analysis, we examine DNA sequencing data to evaluate the alignment coverage of reads across a specified region of the chromosome. Our goal is to compare the observed coverage distribution with a theoretical Poisson distribution, which assumes random distribution of reads. This comparison will help us determine if the sequencing reads follow a random pattern, a common assumption in next-generation sequencing (NGS) analysis. By utilizing statistical tests, we aim to verify the validity of this assumption.
+
+
+<br>
+
+
+
+## Part A :
+
+<br>
+
+
+### Question א :
+
+
+<br>
+
+We want to calculate the average coverage in the same interval that we chose in lab 2. Here we want to calculate the expected distribution with the Poisson model and compare the expected distribution and the distribution obtained from the data in a table.
+
+<br>
+
+
+
+<br>
+
+
+
+```{r}
+beg_region <- 1
+end_region <- 10000000
+N <- end_region - beg_region + 1  # Total number of positions in the region of interest
+read_starts <- rep(0, N)
+
+# Compute coverage based on read locations
+
+filtered_reads <- chr1_reads[Loc >= beg_region & Loc <= end_region, .(Loc)]
+for (r in filtered_reads$Loc) {
+    read_starts[r - beg_region + 1] <- read_starts[r - beg_region + 1] + 1
+}
+
+coverage_data <- data.frame(Position = beg_region:end_region, ReadStarts = read_starts)
+coverage <- read_starts  # Define coverage as read_starts for further analysis
+average_coverage <- mean(coverage)
+cat("Average coverage from 1 to 1e+06 is:", average_coverage, "\n")
+
+# Expected Poisson distribution based on the computed average coverage
+lambda <- average_coverage
+expected_poisson <- dpois(0:5, lambda) 
+
+observed_freq <- table(factor(coverage[1:min(1000000, length(coverage))], levels = 0:5))
+
+total_positions <- min(1000000, length(coverage))
+observed_percentage <- as.numeric(observed_freq) / total_positions
+
+coverage_data <- data.frame(
+  Coverage = 0:5,
+  Observed = observed_percentage,
+  Expected = expected_poisson
+)
+
+coverage_data_long <- pivot_longer(coverage_data, cols = c("Observed", "Expected"), names_to = "Type", values_to = "Frequency")
+
+ggplot(coverage_data_long, aes(x = Coverage, y = Frequency, fill = Type)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_manual(values = c("Observed" = "blue", "Expected" = "red")) +
+  labs(title = "Comparison of Observed and Expected Read Coverage",
+       x = "Number of Reads per Base", y = "Frequency") +
+  theme_minimal()
+```
+
+
+<br>
+
+
+
+```{r}
+
+expected_poisson_full <- dpois(0:max(coverage), lambda) 
+observed_freq_full <- table(factor(coverage, levels = 0:max(coverage)))
+
+expected_poisson_full <- expected_poisson_full / sum(expected_poisson_full)
+
+comparison_table <- data.frame(
+  Intervals = c("0-5", ">5"),
+  Expected_Poisson = c(sum(expected_poisson_full[1:6]), sum(expected_poisson_full[7:length(expected_poisson_full)])),
+  Observed_Data = c(sum(observed_freq_full[1:6]), sum(observed_freq_full[7:length(observed_freq_full)]))
+)
+
+total_positions <- sum(observed_freq_full)
+comparison_table$Observed_Data <- comparison_table$Observed_Data / total_positions
+
+print(comparison_table)
+```
+
+<br>
+
+
+The results show that the expected Poisson probability of having 0-5 reads per base is essentially 100%, while the observed data closely matches this expectation, with 99.99871% of the bases having 0-5 reads. For coverage greater than 5 reads, the expected probability is extremely low (1.114547e-10), and the observed data also reflects this, with only 0.00129% of the bases having more than 5 reads, indicating a strong agreement between the expected and observed distributions.
+
+<br>
+
+
+
+
+### Question ב :
+
+
+<br>
+
+We want to sum the fragments for each cell We use cell size of 10 000.
+
+<br>
+
+```{r , include=TRUE, warning=FALSE, message=FALSE}
+
+setDT(chr1_reads)
+
+cell_size <- 10000  
+
+chr1_data <- chr1_reads[Chrom == 1]
+
+chr1_data[, Cell := floor((Loc - 1) / cell_size) + 1]
+
+# Aggregate to count the number of fragments per cell
+fragment_counts_per_cell <- chr1_data[, .(FragmentCount = .N), by = Cell]
+
+# Sort results by Cell
+fragment_counts_per_cell <- fragment_counts_per_cell[order(Cell)]
+
+print(fragment_counts_per_cell)
+
+ggplot(fragment_counts_per_cell, aes(x = Cell, y = FragmentCount)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "Number of Fragments per Cell on Chromosome 1",
+       x = "Cell Number",
+       y = "Number of Fragments") +
+  theme_minimal() +
+  ylim(0, 4000)  
+```
+
+<br>
+
+#### a.
+
+<br>
+
+
+We first compute the center and dispersion of the observed data using median and IQR, and compare these to the theoretical expectations of a Poisson distribution.
+
+<br>
+
+```{r , include=TRUE, warning=FALSE, message=FALSE}
+
+cell_size <- 10000
+
+chr1_data <- chr1_reads[Chrom == 1]
+
+# Aggregate fragment counts per cell
+chr1_data[, Cell := floor((Loc - 1) / cell_size) + 1]
+fragment_counts_per_cell <- chr1_data[, .N, by = Cell]
+
+
+observed_median <- median(fragment_counts_per_cell$N)
+observed_iqr <- IQR(fragment_counts_per_cell$N)
+
+
+lambda <- mean(fragment_counts_per_cell$N)
+expected_median <- lambda  
+expected_iqr <- qpois(0.75, lambda) - qpois(0.25, lambda)  
+
+cat("Observed Median:", observed_median, "\n")
+cat("Observed IQR:", observed_iqr, "\n")
+cat("Expected Median (Poisson):", expected_median, "\n")
+cat("Expected IQR (Poisson):", expected_iqr, "\n")
+
+```
+
+
+<br>
+
+
+1.	Median Comparison:
+  - Observed Median: 511
+  - Expected Median (Poisson): 528.1539
+  - The observed median is slightly lower than the expected median but relatively close, indicating that the central tendency of your data is not far off from what a Poisson distribution would predict. This suggests a decent fit at the center of the distribution.
+  
+  <br>
+  
+	2.	Interquartile Range (IQR) Comparison:
+  - Observed IQR: 270
+  - Expected IQR (Poisson): 31
+  - The observed IQR is substantially larger than the expected IQR from the Poisson model.
+  
+  <br>
+  
+  This discrepancy indicates a much greater variability in the data than what the Poisson distribution accounts for. Such a wide IQR compared to the model suggests that the data may be overdispersed relative to a Poisson distribution, which assumes the mean equals the variance.
+
+<br>
+
+
+###b.
+
+<br>
+
+
+Then, we plote the histogram of the observed data and overlay the expected Poisson distribution. The histogram of the observed data does not looks like the the expected Poisson distribution.
+
+<br>
+
+
+```{r , include=TRUE, warning=FALSE, message=FALSE}
+
+expected_poisson <- dpois(0:1000, lambda) 
+expected_data <- data.frame(Count = 0:1000, Frequency = expected_poisson)
+
+
+ggplot() +
+  geom_histogram(data = fragment_counts_per_cell, aes(x = N, y = ..density..), 
+                 binwidth = 1, fill = "skyblue", color = "black", alpha = 0.7) +
+  geom_line(data = expected_data, aes(x = Count, y = Frequency, group = 1), 
+            color = "red", size = 1.5) +
+  labs(title = "Observed vs. Expected Poisson Distribution",
+       x = "Number of Fragments per Cell",
+       y = "Density") +
+  theme_minimal() +
+  guides(fill = guide_legend(title = "Legend"), color = guide_legend(title = "Legend")) +
+  coord_cartesian(xlim = c(0, 1000))  # Set x-axis limits from 0 to 1000
+```
+
+<br>
+
+
+- The observed distribution shows a wide spread with a peak around 500 fragments per cell, but also significant frequencies extending towards both lower and higher fragment counts.
+- The Poisson distribution curve, which should ideally fit the data if the event occurrences were completely random and uniformly distributed, is sharply peaked around its mean and rapidly tapers off. This theoretical curve does not capture the breadth of the observed data.
+
+<br>
+
+
+This visual comparison provides strong evidence that the observed data does not follow a uniform Poisson process, suggesting complexities in the underlying biological or technical factors influencing the distribution of fragment counts.
+
+<br>
+
+
+###c.
+
+<br>
+
+
+To quantitatively assess the difference between the observed and expected distributions, you can use the Kullback-Leibler divergence, a common measure of how one probability distribution diverges from a second, expected probability distribution.
+
+<br>
+
+
+```{r , include=TRUE, warning=FALSE, message=FALSE}
+
+
+epsilon <- 1e-10
+observed_probs <- observed_freq / sum(observed_freq) + epsilon
+
+expected_probs <- expected_poisson[1:length(observed_probs)] + epsilon
+
+# Calculate Kullback-Leibler divergence :
+
+kl_divergence <- sum(observed_probs * log(observed_probs / expected_probs))
+
+cat("Kullback-Leibler Divergence:", kl_divergence, "\n")
+```
+
+<br>
+
+The Kullback-Leibler Divergence `r kl_divergence` suggests a considerable discrepancy between the expected and observed distributions. This value implies that using the Poisson model to represent the data would lead to substantial information loss, indicating that the Poisson model may not be an adequate fit.
+
+
+
+<br>
+
+
+
+## Part B :
+
+<br>
+
+
+### Question ב :
+
+
+<br>
+
+### Question a :
+
+<br>
+
+
+We study the data over an interval of 50 million.
+
+<br>
+
+```{r , include=TRUE, warning=FALSE}
+
+your_matrix <- as.matrix(chr1_line)
+char_vector <- as.vector(your_matrix)
+
+first_50000000 <- char_vector[1:50000000]
+
+interval_size <- 5000
+
+cg_counts <- numeric()
+
+for (i in seq(1, 50000000, by = interval_size)) {
+  interval <- first_50000000[i:min(i + interval_size - 1, 50000000)]
+  interval_string <- paste(interval, collapse = "")
+  cg_count <- str_count(interval_string, "GC")
+  cg_counts <- c(cg_counts, cg_count)
+}
+
+print(cg_counts)
+
+```
+
+
+
+```{r , include=TRUE, warning=FALSE}
+
+cell_size <- 5000
+end_region <- 50000000
+num_cells <- ceiling(end_region / cell_size)
+
+for (i in 1:nrow(chr1_reads)) {
+  cell_index <- ceiling(chr1_reads$Loc[i] / cell_size)
+  if (cell_index <= num_cells) {
+    cg_counts[cell_index] <- cg_counts[cell_index] + 1  
+  }
+}
+
+
+coverage_data <- data.frame(Cell = 1:num_cells, CG_Count = cg_counts)
+
+ggplot(coverage_data, aes(x = CG_Count)) +
+  geom_histogram(bins = 50, fill = 'skyblue', color = 'black') +
+  labs(title = "Distribution of Reads per Cell",
+       x = "Number of Reads per Cell",
+       y = "Cell Frequency") +
+  theme_minimal()
+```
+
+
+
+<br>
+
+### Question b :
+
+<br>
+
+In this question, we want to sum the number of reads in each cell.
+
+<br>
+
+```{r , include=TRUE, warning=FALSE, message=FALSE}
+
+count_fragment_starts <- function(data, chrom_number, start_range, end_range) {
+  relevant_data <- data[Chrom == chrom_number & Loc >= start_range & Loc <= end_range,]
+  start_counts <- integer(end_range - start_range + 1)
+  names(start_counts) <- as.character(start_range:end_range)
+  
+  starts <- table(relevant_data$Loc)
+  
+  start_positions <- as.character(names(starts))
+  start_counts[start_positions] <- as.integer(starts)
+  
+  return(start_counts)
+}
+
+
+
+small_range_counts <- count_fragment_starts(chr1_reads, 1, 1, 50000000)
+# print(small_range_counts)
+
+
+
+calculate_chunk_sums <- function(vec, chunk_size) {
+  chunks <- split(vec, rep(1:ceiling(length(vec) / chunk_size), each = chunk_size, length.out = length(vec)))
+  chunk_sums <- sapply(chunks, sum)
+  
+  return(chunk_sums)
+}
+
+
+chunk_size <- 5000
+result_vector <- calculate_chunk_sums(small_range_counts, chunk_size)
+
+cat("Length of the result vector:", length(result_vector), "\n")
+
+print(result_vector)
+
+```
+
+<br>
+
+We found the number of reads by interval of lenght 5 000.
+
+
+<br>
+
+
+### Question c :
+
+<br>
+
+In this question, we want to find the correlation coefficient between our two vectors : vectors of CG count and the vector of number of reads.
+<br>
+
+
+```{r}
+
+cg_vector <- as.vector(cg_counts)
+correlation_coefficient <- cor(cg_vector, result_vector)
+
+print(correlation_coefficient)
+
+
+```
+
+<br>
+
+The correlation coefficient is positive. Thanks to our result, we can see that they have correlation because the correlation coefficient is closer to 1 than 0. 
+
+<br>
+
+
+### Question d :
+
+<br>
+
+We want to graph the number of CGs in relation to the number of reads and create a regret line to see if there is a correlation between the two.
+
+<br>
+
+
+
+
+```{r}
+
+dt <- data.frame(cg_counts, result_vector)
+
+ggplot(dt, aes(x = cg_counts, y = result_vector)) +
+  geom_point(color = "blue", alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Relationship between CG Counts and Reads per Cell",
+       x = "CG Counts per Cell",
+       y = "Total Reads per Cell (Sum of Fragment Lengths)") +
+  theme_minimal()
+
+
+```
+
+<br>
+
+We can see a scatterplot gathering around the regression line which is ascending as well as several outliers above the regression line and many outliers below.
+
+<br>
+
+It is different of plot of Dohm because in the two plot, we can see a clearly ascending trend but in our plot we have much more outliers.
+
+<br>
+
+
+
+### Question e :
+
+
+<br>
+
+In both parts, we used statistic concepts to analyse our datasets and to see if there is a specific pattern about the results.
+
+<br>
+
+
+
+## Short summary :
+
+<br>
+
+In this duty we have dealt with two parts. The first was whether there was a similarity between a uniform poisson model and the distribution we observed. This was the distribution of the average read per base. Help. of a table and a graph , we concluded that the model was not really in line with the theory.
+
+<br>
+
+In the second part, we wanted to know if there was a correlation between the number of bases CG by intervals with the number of reads in these same intervals. We calculated the correlation coefficient and we see there wasn't a correlation between the number of bases CG by intervals with the number of reads.
+Then, we drew a regression line  and thanks to that we can see that aren't correlation between our CG counts and our number of reads.
+
+<br>
+
+<br>
+
+
+
+
+
