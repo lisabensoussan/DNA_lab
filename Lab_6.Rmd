@@ -1,0 +1,484 @@
+---
+title: "HW6"
+author: "Group 8"
+date: "2 July 2024"
+output:
+  html_document:
+    code_folding: show
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+<br>
+
+Group:
+
+Lisa Bensousan  - 346462534  - lisa.bensoussan@mail.huji.ac.il  <br>
+Dan Levy  - 346453202  - dan.levy5@mail.huji.ac.il                <br>
+Emmanuelle Fareau  - 342687233 -  emmanuel.fareau@mail.huji.ac.il    <br>
+
+<br>
+
+### Libraries used
+
+<br>
+
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(splines)
+library(data.table)
+library(caret)
+
+```
+
+<br>
+
+### Paths and Data
+
+```{r paths}
+reads_data <- "/Users/lisabensoussan/Desktop/lab6/TCGA-13-0723-01A_lib1_all_chr1.forward"
+chr1_reads = fread(reads_data)
+colnames(chr1_reads) = c("Chrom","Loc","FragLen")
+head(chr1_reads)
+load("/Users/lisabensoussan/Desktop/lab6/chr1_str_30M_50M.rda")
+
+
+# load("C:/Users/Emmanuelle Fareau/Downloads/chr1_str_30M_50M.rda")
+# 
+# reads_data <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-01A_lib1_all_chr1.forward"
+# chr1_reads = fread(reads_data)
+# colnames(chr1_reads) = c("Chrom","Loc","FragLen")
+# head(chr1_reads)
+
+
+
+# reads_data <- "/Users/Emmanuelle Fareau/Documents/Cours 2023-2024    (annee 4)/Maabada/TCGA-13-0723-01A_lib1_all_chr1.forward"
+# chr1_reads = fread(reads_data)
+# colnames(chr1_reads) = c("Chrom","Loc","FragLen")   
+# head(chr1_reads)
+# 
+# 
+data <- chr1_reads
+
+
+
+
+```
+
+## Introduction 
+
+<br>
+
+In this work, we would like to delve deeper into the subject of copy number. For this, we will assume a random variable (Y) which follows a Poisson distribution of lambda expectation. Using this model and several mathematical calculations we will try to estimate the number of copies and check the quality of the estimator.
+
+<br>
+
+
+## Part 1
+
+<br>
+
+We have a model of the following form :
+
+$$Y_{i} \sim Poisson (\lambda_{i})$$
+
+$$\lambda_{i} = a_{i} \times f(gc_{i}) \times \eta_{i}$$
+
+For this model, we want to estimate the number of copies ($\hat{a}$).
+
+<br>
+
+To do this, we will first divide our data into segments of length 1000, then we will calculate the number of GCs per segment.
+
+<br>
+
+```{r}
+sequence <- chr1_str_30M_50M
+sequence <- strsplit(sequence, "")
+sequence <- sequence[[1]]
+
+frag <- as.numeric(chr1_reads$FragLen)
+
+segment_length <- 10000
+num_segments <- length(sequence)/10000
+
+segments <- split(sequence, rep(1:num_segments, each = segment_length, length.out = length(sequence)))
+
+
+calculate_gc_content <- function(seq) {
+  gc_count <- sum(seq == "G" | seq == "C")
+  return(gc_count)
+}
+
+gc_contents <- sapply(segments, calculate_gc_content)
+head(gc_contents)
+```
+
+
+<br>
+
+Then we will calculate the number of fragments per segment :
+
+<br>
+
+
+```{r}
+count_fragment_starts <- function(data, chrom_number, start_range, end_range) {
+  relevant_data <- data[Chrom == chrom_number & Loc >= start_range & Loc <= end_range,]
+  start_counts <- integer(end_range - start_range + 1)
+  names(start_counts) <- as.character(start_range:end_range)
+  
+  starts <- table(relevant_data$Loc)
+  
+  start_positions <- as.character(names(starts))
+  start_counts[start_positions] <- as.integer(starts)
+  
+  return(start_counts)
+}
+
+fragment_counts <- count_fragment_starts(chr1_reads, 1, 0, 20000000)
+
+
+
+sum_frag <- numeric(length = length(fragment_counts) / 10000)
+
+
+for (i in seq(1, length(fragment_counts), by = 10000)) {
+  group_index <- (i - 1) / 10000 
+  sum_frag[group_index] <- sum(fragment_counts[i:(i+9999)])
+}
+
+
+head(sum_frag)
+
+```
+
+<br>
+
+For convenience, we will create a data which contains the two vectors that we want to calculate. That is to say the number of GCs and the number of fragments for each fragment of the chromosomes.
+
+<br>
+
+Finally, we will apply a spline regression on our model, with our GC count as an explanatory variable and our number of fragmentations as a variable to predict.
+
+<br>
+
+```{r}
+
+data <- data.frame(gc_count = gc_contents, fragment = sum_frag)
+
+knots <- quantile(data$gc_count, probs = c(0.25, 0.5, 0.75))
+
+model <- lm(fragment ~ ns(gc_count, knots = knots), data = data)
+
+print(summary(model))
+
+
+```
+
+
+<br>
+
+Thanks to all the steps that we have just carried out, we will now be able to create a function to estimate the number of copies per cell.
+
+<br>
+
+This function receives the number of GCs, the number of fragments and the spline regression calculated previously and calculates the estimated number of copies thanks to the following mathematical development: 
+
+\
+
+
+$$\lambda_{i} = a_{i} \times f(gc_{i}) \times \eta_{i}$$ 
+
+\
+
+
+
+$$E[Y_{i}] = \lambda_{i}$$ 
+
+\
+
+
+
+$$E[Y_{i}] =a_{i} \times f(gc_{i}) \times \eta_{i}$$
+
+\
+
+
+
+$$a_{i} = \frac{E[Y_{i}]}{f(gc_{i})} \times \frac{1}{\eta_{i}} \simeq \frac{E[Y_{i}]}{f(gc_{i})}$$ 
+
+\
+
+$$\hat{a}_{i} = \frac{Y_{i}}{\hat{f}(gc_{i})}$$
+
+
+<br>
+
+
+```{r}
+
+estimate_copy_number <- function(Y, GC, f) {
+  f_gc_hat <- predict(model, newdata = data.frame(gc_count = GC))
+  a_hat <- Y / f_gc_hat
+  return(a_hat)
+}
+
+
+Y <- data$fragment
+GC <- data$gc_count
+
+
+estimated_copy_numbers <- estimate_copy_number(Y, GC, model)
+head(estimated_copy_numbers)
+
+copy_numbers <- list(estimated_copy_numbers)
+length(copy_numbers)
+```
+
+<br>
+
+
+Thanks to this function, we obtained a vector with the estimated number of copies for each chromosome segment.
+We then transform this into a list of length 1 using the `list` function.
+
+
+
+<br>
+
+
+## Part 2
+
+
+<br>
+#HERE WE CHOOSE THE FIRST 1000 INTERVALS AND DO REGRESSION OF Y according to GC counts 
+
+```{r}
+
+Y_2 <- data$fragment[1:1000]
+GC_2 <- data$gc_count[1:1000]
+
+
+estimated_copy_numbers_2 <- estimate_copy_number(Y_2, GC_2, model)
+head(estimated_copy_numbers_2)
+```
+
+### a :
+#We realize a plot which shows us the distribution of the number of copies in each interval . 
+
+```{r}
+
+hist_obj<- hist(estimated_copy_numbers_2, breaks = 30, main = "Marginal distribution of copy number estimates", 
+     xlab = "Copy number estimates", col = "blue", border = "black")
+text(x = hist_obj$mids, y = hist_obj$counts, labels = hist_obj$counts, pos = 3, cex = 0.8, col = "black")
+
+plot(estimated_copy_numbers_2, type = "l", main = "Distribution of copy number estimates along the genome", 
+     xlab = "Genome Index", ylab = "Copy number estimates", col = "blue", lwd = 2)
+
+
+# Ajouter des zones ombrées (par exemple, pour des plages spécifiques de l'index du génome)
+rect(0, min(estimated_copy_numbers_2), 70, max(estimated_copy_numbers_2), col = rgb(0.1, 0.1, 0.1, 0.1), border = NA)
+rect(110, min(estimated_copy_numbers_2), 170, max(estimated_copy_numbers_2), col = rgb(0.1, 0.1, 0.1, 0.1), border = NA)
+rect(230, min(estimated_copy_numbers_2), 300, max(estimated_copy_numbers_2), col = rgb(0.1, 0.1, 0.1, 0.1), border = NA)
+rect(380, min(estimated_copy_numbers_2), 420, max(estimated_copy_numbers_2), col = rgb(0.1, 0.1, 0.1, 0.1), border = NA)
+rect(500, min(estimated_copy_numbers_2), 600, max(estimated_copy_numbers_2), col = rgb(0.1, 0.1, 0.1, 0.1), border = NA)
+
+
+```
+
+### b :
+# We calculate the differences between 1 and the estimated copies number and want too analyse them .
+```{r}
+data$estimated_copy_numbers_2 <- estimated_copy_numbers_2
+data$difference <- abs(1-data$estimated_copy_numbers_2)
+
+summary(data$difference)
+
+```
+
+
+```{r}
+lower_bound <- 0.8
+upper_bound <- 1.2
+
+close_to_one <- sum(estimated_copy_numbers_2 >= lower_bound & estimated_copy_numbers_2 <= upper_bound)
+proportion_close_to_one <- close_to_one / length(estimated_copy_numbers_2)
+
+print(proportion_close_to_one)
+
+hist_obj<- hist(estimated_copy_numbers_2, breaks = 30, main = "Marginal distribution of copy number estimates", 
+     xlab = "Copy number estimates", col = "purple", border = "black")
+abline(v = c(0.8, 1.2), col = "blue", lwd = 2, lty = 2)
+```
+
+```{r}
+
+sd_diff <- sd(data$difference)
+print(paste("Standard deviation of differences :", sd_diff))
+
+
+diff_data <- data.frame(Index = 1:length(data$difference), Differences = data$difference)
+
+
+hist_plot <- ggplot(diff_data, aes(x = Differences)) +
+  geom_histogram(binwidth = 0.1, fill = "blue", color = "black") +
+  ggtitle("Histogram of differences from 1") +
+  xlab("Differences") +
+  ylab("Frequency")
+
+
+box_plot <- ggplot(diff_data, aes(y = Differences)) +
+  geom_boxplot(fill = "orange", color = "black") +
+  ggtitle("Boxplot of differences from 1") +
+  ylab("Differences") +
+  coord_cartesian(xlim = c(-1.5, 1.5))
+
+
+density_plot <- ggplot(diff_data, aes(x = Differences)) +
+  geom_density(fill = "green", alpha = 0.5) +
+  ggtitle("Density of differences relative to 1") +
+  xlab("Differences") +
+  ylab("Density")
+
+
+scatter_plot <- ggplot(diff_data, aes(x = Index, y = Differences)) +
+  geom_point(color = "red") +
+  ggtitle("Scatter plot of differences along the index") +
+  xlab("Genome Index") +
+  ylab("Differences")
+
+
+print(hist_plot)
+print(box_plot)
+print(density_plot)
+print(scatter_plot)
+
+
+# bedikat asharot ?
+```
+
+
+
+<br>
+
+
+## Part 3
+
+<br>
+
+
+```{r}
+
+# mae <- mean(abs(data$difference[1:1000]), na.rm = TRUE)  
+# rmse <- sqrt(mean(data$difference[1:1000]^2, na.rm = TRUE))  
+# 
+# print(paste("Mean Absolute Error (MAE) :", mae))
+# print(paste("Root Mean Square Error (RMSE) :", rmse))
+
+```
+```{r}
+data$categorized_copy_number <- with(data, ifelse(data$estimated_copy_numbers_2 < 0.75, 0.5,
+                                        ifelse(data$estimated_copy_numbers_2 < 1.25, 1,
+                                        ifelse(data$estimated_copy_numbers_2 < 1.75, 1.5, 2))))
+
+
+
+data$true_difference <- abs(data$categorized_copy_number - data$estimated_copy_numbers_2)
+
+stats <- summary(data$true_difference)
+print(stats)
+
+sd_diff <- sd(data$true_difference, na.rm = TRUE)
+print(paste("Standard deviation of differences :", sd_diff))
+
+
+```
+
+```{r}
+
+hist_plot <- ggplot(data, aes(x = true_difference)) +
+  geom_histogram(binwidth = 0.1, fill = "blue", color = "black") +
+  ggtitle("Histogram of the differences between the true values of a and the estimated number of copies (a^)") +
+  xlab("Differences") +
+  ylab("Frequency")
+
+
+box_plot <- ggplot(data, aes(y = true_difference)) +
+  geom_boxplot(fill = "orange", color = "black") +
+  ggtitle("Boxplot of the differences between the true values of a and the estimated values of a") +
+  ylab("Differences")
+
+
+print(hist_plot)
+print(box_plot)
+
+```
+
+
+
+```{r}
+plot <- ggplot(data) +
+  geom_point(aes(x = 1:nrow(data), y = estimated_copy_numbers_2, color = "Estimated values of a"), size = 2) +
+  geom_point(aes(x = 1:nrow(data), y = categorized_copy_number, color = "True value of a"), size = 2) +
+  geom_segment(aes(x = 1:nrow(data), xend = 1:nrow(data),
+                   y = estimated_copy_numbers_2, yend = categorized_copy_number), color = "grey") +
+  scale_color_manual(values = c("Estimated values of a" = "purple", "True value of a" = "blue3")) +
+  ggtitle("Comparison between true values of a and estimated values of a") +
+  xlab("Index") +
+  ylab("Values") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.title.x = element_text(size = 12),
+    axis.title.y = element_text(size = 12),
+    legend.position = "bottom",
+    legend.title = element_blank()
+  )
+
+
+print(plot)
+```
+
+
+
+<br>
+
+
+####Conclusion:
+
+The histogram and boxplot of differences between the true and estimated values further indicate the estimator’s performance. The median difference of 0.1473 and a relatively low standard deviation of differences at 0.1237 confirm that the discrepancies between estimated and true values are modest for most observations.
+
+However, the presence of some outliers, as evidenced by the maximum difference reaching up to about 1.5329, suggests that the estimator can occasionally deviate significantly from the true values. This could be a result of particular data points where the model assumptions may not hold or external factors that were not accounted for in the model.
+
+Overall, the estimator seems sufficiently reliable for estimating genomic copy numbers in this context, given its generally tight clustering around the true values and modest variability. Nevertheless, attention should be paid to outliers and potential model improvements could be considered to address these deviations, ensuring even more robust estimations in future analyses.
+
+<br>
+
+## Part 4
+
+<br>
+
+
+
+
+
+<br>
+
+
+
+
+
+## Short summary
+
+
+<br>
+
+After all our research we have deduced that the estimator was rather of good quality by calculating the average of the differences between the true and the predicted values. 
+We also calculated the proximity with the number 1 which was the ideal number of copies for the Y model and noticed that a small proportion was very close to it .
+Finally ..... 
+
+
+<br>
